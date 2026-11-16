@@ -16,7 +16,7 @@
 
     var manifest = {
         type: 'video',
-        version: '1.1.0',
+        version: '1.2.0',
         name: 'Кинопоиск: сборы, награды и актёры',
         description: 'Сборы, награды и информация об актёрах с Кинопоиска',
         component: 'kinopoisk_info'
@@ -869,21 +869,23 @@
         })
     }
 
-    function handlePersonPage(movie, e, $body) {
-        if ($body.find('.filminfo-section').length) return
-
-        var showActor = setting('filminfo_actor_info', true)
-        if (!showActor) return
+    function showActorCard(person, $root) {
+        if ($root.find('.filminfo-section').length) return
 
         var $section = $(sectionHtml(actorBlockHtml(), T('filminfo_actor_section')))
 
-        var $descr = $body.find('.full-descr, .full-person__description').first().closest('.items-line')
-        if ($descr.length) {
-            $descr.after($section)
+        var $head = $root.find('.person-start').first().closest('.items-line')
+        if ($head.length) {
+            $head.after($section)
         } else {
-            var $first = $body.find('.items-line').first()
-            if ($first.length) $first.before($section)
-            else $body.append($section)
+            var $descr = $root.find('.full-descr, .full-person__description').first().closest('.items-line')
+            if ($descr.length) {
+                $descr.after($section)
+            } else {
+                var $first = $root.find('.items-line').first()
+                if ($first.length) $first.before($section)
+                else $root.append($section)
+            }
         }
 
         registerSelectors($section)
@@ -895,7 +897,54 @@
             return
         }
 
-        loadActor(movie, $section)
+        loadActor(person, $section)
+    }
+
+    function handlePersonPage(movie, e, $body) {
+        if (!setting('filminfo_actor_info', true)) return
+        showActorCard(movie, $body)
+    }
+
+    var actorCardTimer = null
+    var actorCardDone = false
+
+    function resetActorCard() {
+        actorCardDone = false
+        if (actorCardTimer) {
+            clearTimeout(actorCardTimer)
+            actorCardTimer = null
+        }
+    }
+
+    function tryActorCard() {
+        if (actorCardDone) return
+        actorCardDone = true
+
+        var attempts = 0
+        var MAX_ATTEMPTS = 50
+
+        function poll() {
+            if (attempts++ > MAX_ATTEMPTS) return
+
+            var $act = $('.activity--active')
+            if (!$act.length) return
+
+            var $name = $act.find('.person-start__name').first()
+            if (!$name.length) {
+                actorCardTimer = setTimeout(poll, 400)
+                return
+            }
+
+            var name = $name.text().trim()
+            if (!name) {
+                actorCardTimer = setTimeout(poll, 400)
+                return
+            }
+
+            showActorCard({ name: name }, $act)
+        }
+
+        actorCardTimer = setTimeout(poll, 400)
     }
 
     function currentController() {
@@ -1252,6 +1301,10 @@
     function onActivity(e) {
         if (e.type == 'archive' || e.type == 'destroy') {
             if (network) network.clear()
+        }
+        if (e.type == 'start' && e.component == 'actor' && setting('filminfo_actor_info', true)) {
+            resetActorCard()
+            tryActorCard()
         }
     }
 
