@@ -8,6 +8,9 @@
     var CACHE_TTL = 24 * 60 * 60 * 1000
     var MAX_ALL_PAGES = 3
     var PREVIEW_COUNT = 3
+    var MAX_GALLERY_PAGES = 3
+    var MAX_GALLERY_ITEMS = 24
+    var MAX_FILMOGRAPHY = 10
     var KP_BASE = 'https://kinopoiskapiunofficial.tech'
     var BO_ORDER = { BUDGET: 0, WORLD: 1, USA: 2, RUS: 3 }
 
@@ -15,9 +18,9 @@
 
     var manifest = {
         type: 'video',
-        version: '1.0.2',
-        name: 'Кинопоиск: сборы и комментарии',
-        description: 'Кассовые сборы и комментарии с Кинопоиска на странице фильма',
+        version: '1.1.0',
+        name: 'Кинопоиск: сборы, награды, актёры и фото',
+        description: 'Сборы, награды, фото и информация об актёрах с Кинопоиска',
         component: 'kinopoisk_info'
     }
 
@@ -27,7 +30,7 @@
 
     function translations() {
         Lampa.Lang.add({
-            filminfo_title: { ru: 'Кинопоиск: сборы и комментарии', en: 'Kinopoisk: box office & comments' },
+            filminfo_title: { ru: 'Кинопоиск: сборы, награды, актёры и фото', en: 'Kinopoisk: box office, awards, actors & photos' },
             filminfo_box_office: { ru: 'Сборы', en: 'Box office' },
             filminfo_comments: { ru: 'Комментарии', en: 'Comments' },
             filminfo_budget: { ru: 'Бюджет', en: 'Budget' },
@@ -52,13 +55,32 @@
             filminfo_neu: { ru: 'нейтральных', en: 'neutral' },
             filminfo_neg: { ru: 'отрицательных', en: 'negative' },
             filminfo_close: { ru: 'Закрыть', en: 'Close' },
-            filminfo_settings_name: { ru: 'Кинопоиск: сборы и комментарии', en: 'Kinopoisk: box office & comments' },
+            filminfo_settings_name: { ru: 'Кинопоиск: сборы, награды, актёры и фото', en: 'Kinopoisk: box office, awards, actors & photos' },
             filminfo_set_token: { ru: 'Токен API Кинопоиска (X-API-KEY)', en: 'Kinopoisk API token (X-API-KEY)' },
             filminfo_set_token_desc: { ru: 'Получить можно на kinopoiskapiunofficial.tech. Хранится только в настройках Lampa.', en: 'Get it at kinopoiskapiunofficial.tech. Stored only in Lampa settings.' },
             filminfo_set_boxoffice: { ru: 'Показывать сборы', en: 'Show box office' },
             filminfo_set_comments: { ru: 'Показывать комментарии', en: 'Show comments' },
             filminfo_set_proxy: { ru: 'CORS-прокси (необязательно)', en: 'CORS proxy (optional)' },
-            filminfo_set_proxy_desc: { ru: 'Префикс прокси, если API недоступен напрямую. Должен передавать заголовок X-API-KEY.', en: 'Proxy prefix if the API is not reachable directly. It must forward the X-API-KEY header.' }
+            filminfo_set_proxy_desc: { ru: 'Префикс прокси, если API недоступен напрямую. Должен передавать заголовок X-API-KEY.', en: 'Proxy prefix if the API is not reachable directly. It must forward the X-API-KEY header.' },
+            filminfo_set_awards: { ru: 'Показывать награды', en: 'Show awards' },
+            filminfo_set_gallery: { ru: 'Показывать фото', en: 'Show gallery' },
+            filminfo_set_actor_info: { ru: 'Показывать информацию об актёрах', en: 'Show actor info' },
+            filminfo_awards: { ru: 'Награды', en: 'Awards' },
+            filminfo_gallery: { ru: 'Фото', en: 'Gallery' },
+            filminfo_actor_section: { ru: 'Кинопоиск: актёр', en: 'Kinopoisk: actor' },
+            filminfo_no_awards: { ru: 'Нет данных о наградах', en: 'No awards data' },
+            filminfo_no_gallery: { ru: 'Фото не найдены', en: 'No photos found' },
+            filminfo_awards_win: { ru: 'Победа', en: 'Win' },
+            filminfo_awards_nom: { ru: 'Номинация', en: 'Nomination' },
+            filminfo_actor_growth: { ru: 'Рост', en: 'Height' },
+            filminfo_actor_birthday: { ru: 'Дата рождения', en: 'Birthday' },
+            filminfo_actor_birthplace: { ru: 'Место рождения', en: 'Birthplace' },
+            filminfo_actor_death: { ru: 'Дата смерти', en: 'Death date' },
+            filminfo_actor_deathplace: { ru: 'Место смерти', en: 'Deathplace' },
+            filminfo_actor_spouse: { ru: 'Супруг(а)', en: 'Spouse' },
+            filminfo_actor_children: { ru: 'Дети', en: 'Children' },
+            filminfo_actor_facts: { ru: 'Факты', en: 'Facts' },
+            filminfo_actor_filmography: { ru: 'Фильмография', en: 'Filmography' }
         })
     }
 
@@ -88,6 +110,24 @@
             component: 'kinopoisk_info',
             param: { name: 'filminfo_reviews', type: 'trigger', default: true },
             field: { name: Lampa.Lang.translate('filminfo_set_comments') }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'filminfo_awards', type: 'trigger', default: true },
+            field: { name: Lampa.Lang.translate('filminfo_set_awards') }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'filminfo_gallery', type: 'trigger', default: true },
+            field: { name: Lampa.Lang.translate('filminfo_set_gallery') }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'filminfo_actor_info', type: 'trigger', default: true },
+            field: { name: Lampa.Lang.translate('filminfo_set_actor_info') }
         })
 
         Lampa.SettingsApi.addParam({
@@ -153,7 +193,41 @@
             'body.light--version .filminfo-btn{background:rgba(0,0,0,0.08)}' +
             'body.light--version .filminfo-btn.focus{background:#000;color:#fff}' +
             'body.light--version .filminfo-all-review{border-bottom-color:rgba(0,0,0,0.1)}' +
-            'body.light--version .filminfo-all-review__head.focus{background:rgba(0,0,0,0.08)}'
+            'body.light--version .filminfo-all-review__head.focus{background:rgba(0,0,0,0.08)}' +
+            '.filminfo-award{display:flex;flex-wrap:wrap;align-items:center;gap:0.5em 1.2em;padding:0.8em 1.1em;background:rgba(0,0,0,0.25);border-radius:0.7em}' +
+            '.filminfo-award__year{font-weight:600;opacity:0.8;min-width:3.5em}' +
+            '.filminfo-award__name{font-weight:500;flex:1 1 14em}' +
+            '.filminfo-award__result{font-size:0.95em;padding:0.15em 0.7em;border-radius:1em}' +
+            '.filminfo-award__result--win{color:#4caf50;border:1px solid rgba(76,175,80,0.5)}' +
+            '.filminfo-award__result--nom{color:#ffc107;border:1px solid rgba(255,193,7,0.5)}' +
+            '.filminfo-award__cat{opacity:0.75;font-size:0.95em;flex-basis:100%}' +
+            '.filminfo-gallery{display:flex;flex-wrap:wrap;gap:0.8em}' +
+            '.filminfo-gallery__item{flex:0 0 auto;width:16em;height:9em;border-radius:0.6em;overflow:hidden;cursor:pointer;background:rgba(0,0,0,0.25)}' +
+            '.filminfo-gallery__item img{width:100%;height:100%;object-fit:cover;display:block}' +
+            '.filminfo-gallery__item.focus{outline:0.2em solid #fff;outline-offset:-0.2em}' +
+            '.filminfo-gallery-modal{height:100%;display:flex;flex-direction:column}' +
+            '.filminfo-gallery-modal__img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}' +
+            '.filminfo-gallery-modal__img img{max-width:100%;max-height:65vh;object-fit:contain}' +
+            '.filminfo-gallery-modal__nav{display:flex;align-items:center;justify-content:center;padding-top:1em}' +
+            '.filminfo-gallery-modal__counter{opacity:0.7;font-size:1.2em}' +
+            '.filminfo-actor{display:flex;gap:1.5em;flex-wrap:wrap}' +
+            '.filminfo-actor__photo{flex:0 0 13em;width:13em;height:18em;border-radius:0.8em;overflow:hidden;background:rgba(0,0,0,0.25)}' +
+            '.filminfo-actor__photo img{width:100%;height:100%;object-fit:cover;display:block}' +
+            '.filminfo-actor__info{flex:1 1 26em;min-width:0}' +
+            '.filminfo-actor__name{font-size:1.7em;font-weight:600;margin-bottom:0.6em}' +
+            '.filminfo-actor__facts{display:flex;flex-wrap:wrap;margin:-0.5em}' +
+            '.filminfo-actor__fact{flex:1 1 12em;margin:0.5em;padding:0.8em 1em;background:rgba(0,0,0,0.25);border-radius:0.7em}' +
+            '.filminfo-actor__fact-name{font-size:0.9em;opacity:0.7;margin-bottom:0.3em}' +
+            '.filminfo-actor__fact-value{font-size:1.1em;font-weight:500}' +
+            '.filminfo-actor__facts-title{font-size:1.25em;font-weight:500;margin:1.2em 0 0.5em}' +
+            '.filminfo-actor__facts-text{font-size:1.15em;line-height:1.5}' +
+            '.filminfo-filmography{display:flex;flex-direction:column;gap:0.5em}' +
+            '.filminfo-filmography__item{display:flex;gap:1em;opacity:0.9}' +
+            '.filminfo-filmography__year{opacity:0.6;min-width:3em}' +
+            'body.light--version .filminfo-award{background:rgba(0,0,0,0.05)}' +
+            'body.light--version .filminfo-gallery__item{background:rgba(0,0,0,0.08)}' +
+            'body.light--version .filminfo-actor__photo{background:rgba(0,0,0,0.08)}' +
+            'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}'
 
         $('<style id="filminfo-style">').html(css).appendTo('head')
     }
@@ -408,10 +482,121 @@
         })
     }
 
-    function sectionHtml(body) {
+    function fetchAwards(kpId, callback) {
+        var url = kpUrl('/api/v2.2/films/' + kpId + '/awards')
+        kpGet(url, function (json) {
+            callback(json && json.items ? json.items : [])
+        }, function (kind) {
+            callback(null, kind)
+        })
+    }
+
+    function fetchImages(kpId, page, callback) {
+        var url = kpUrl('/api/v2.2/films/' + kpId + '/images?type=STILL&page=' + page)
+        kpGet(url, function (json) {
+            callback(json || null)
+        }, function (kind) {
+            callback(null, kind)
+        })
+    }
+
+    function fetchStaff(kpId, callback) {
+        var url = kpUrl('/api/v1/staff?filmId=' + kpId)
+        kpGet(url, function (json) {
+            callback(Array.isArray(json) ? json : [])
+        }, function (kind) {
+            callback(null, kind)
+        })
+    }
+
+    function fetchPerson(personId, callback) {
+        var url = kpUrl('/api/v1/staff/' + personId)
+        kpGet(url, function (json) {
+            callback(json || null)
+        }, function (kind) {
+            callback(null, kind)
+        })
+    }
+
+    function normalizeName(s) {
+        return String(s == null ? '' : s).toLowerCase().replace(/[^a-zа-яё0-9]/gi, '')
+    }
+
+    function readPersons() {
+        try {
+            var map = Lampa.Storage.get('filminfo_kp_persons', null)
+            return map && typeof map == 'object' ? map : {}
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function cachePersons(staff) {
+        try {
+            var map = readPersons()
+            var added = false
+            staff.forEach(function (s) {
+                if (!s || !s.staffId) return
+                if (s.nameRu) map[normalizeName(s.nameRu)] = { id: s.staffId, name: s.nameRu }
+                if (s.nameEn) map[normalizeName(s.nameEn)] = { id: s.staffId, name: s.nameRu || s.nameEn }
+                added = true
+            })
+            if (!added) return
+            var keys = Object.keys(map)
+            if (keys.length > 2000) {
+                var trimmed = {}
+                keys.slice(-1000).forEach(function (k) { trimmed[k] = map[k] })
+                map = trimmed
+            }
+            Lampa.Storage.set('filminfo_kp_persons', map)
+        } catch (e) {}
+    }
+
+    function lookupPerson(map, person) {
+        var candidates = [person.name, person.original_name, person.title]
+        for (var i = 0; i < candidates.length; i++) {
+            var n = normalizeName(candidates[i])
+            if (n && map[n]) return map[n]
+        }
+        return null
+    }
+
+    function resolveKpPersonId(person, callback, retried) {
+        var found = lookupPerson(readPersons(), person)
+        if (found) {
+            callback({ id: found.id, name: found.name })
+            return
+        }
+
+        if (retried) {
+            callback({ error: 'notfound' })
+            return
+        }
+
+        var last = null
+        try { last = Lampa.Storage.get('filminfo_last_kp_film', null) } catch (e) {}
+        if (!last || !last.id) {
+            callback({ error: 'notfound' })
+            return
+        }
+
+        fetchStaff(last.id, function (staff) {
+            if (Array.isArray(staff) && staff.length) {
+                cachePersons(staff)
+                var found2 = lookupPerson(readPersons(), person)
+                if (found2) {
+                    callback({ id: found2.id, name: found2.name })
+                    return
+                }
+            }
+            callback({ error: 'notfound' })
+        })
+    }
+
+    function sectionHtml(body, title) {
         return '<div class="items-line filminfo-section">' +
             '<div class="items-line__head">' +
-            '<div class="items-line__title">' + esc(T('filminfo_title')) + '</div>' +
+            '<div class="items-line__title">' + esc(title || T('filminfo_title')) + '</div>' +
             '</div>' +
             '<div class="items-line__body filminfo-body">' + body + '</div>' +
             '</div>'
@@ -432,6 +617,27 @@
         return '<div class="filminfo-row">' +
             blockSubtitle(T('filminfo_comments')) +
             '<div class="filminfo-reviews-list"></div>' +
+            '</div>'
+    }
+
+    function awardsBlockHtml() {
+        return '<div class="filminfo-row">' +
+            blockSubtitle(T('filminfo_awards')) +
+            '<div class="filminfo-awards"></div>' +
+            '</div>'
+    }
+
+    function galleryBlockHtml() {
+        return '<div class="filminfo-row">' +
+            blockSubtitle(T('filminfo_gallery')) +
+            '<div class="filminfo-gallery"></div>' +
+            '</div>'
+    }
+
+    function actorBlockHtml() {
+        return '<div class="filminfo-row filminfo-actor">' +
+            '<div class="filminfo-actor__photo"></div>' +
+            '<div class="filminfo-actor__info"></div>' +
             '</div>'
     }
 
@@ -558,6 +764,276 @@
         })
     }
 
+    function awardItemHtml(a) {
+        var win = !!(a.win)
+        var label = win ? T('filminfo_awards_win') : T('filminfo_awards_nom')
+        var cls = win ? 'filminfo-award__result--win' : 'filminfo-award__result--nom'
+        var cat = (a.nominationItem && a.nominationItem.name) || a.nominationName || ''
+        var html = '<div class="filminfo-award">'
+        html += '<div class="filminfo-award__year">' + (a.year ? esc(a.year) : '') + '</div>'
+        html += '<div class="filminfo-award__name">' + esc(a.name || '—') + '</div>'
+        html += '<span class="filminfo-award__result ' + cls + '">' + esc(label) + '</span>'
+        if (cat) html += '<div class="filminfo-award__cat">' + esc(cat) + '</div>'
+        html += '</div>'
+        return html
+    }
+
+    function loadAwards(kpId, $box) {
+        $box.html(loadingHtml())
+
+        fetchAwards(kpId, function (items, kind) {
+            if (!items) {
+                $box.html(msgHtml(kind == 'auth' ? T('filminfo_error_auth') : T('filminfo_error')))
+                syncFull()
+                return
+            }
+            if (!items.length) {
+                $box.html(msgHtml(T('filminfo_no_awards')))
+                syncFull()
+                return
+            }
+
+            items.sort(function (a, b) {
+                return (a.year || 0) - (b.year || 0)
+            })
+
+            var html = ''
+            items.forEach(function (a) {
+                html += awardItemHtml(a)
+            })
+            $box.html(html)
+            syncFull()
+        })
+    }
+
+    function loadGallery(kpId, $box, movie) {
+        $box.html(loadingHtml())
+
+        var items = []
+
+        function render() {
+            if (!items.length) {
+                $box.html(msgHtml(T('filminfo_no_gallery')))
+                syncFull()
+                return
+            }
+            var html = ''
+            items.forEach(function (it, i) {
+                var src = it.previewUrl || it.image
+                html += '<div class="filminfo-gallery__item selector" data-index="' + i + '">' +
+                    '<img loading="lazy" src="' + esc(src) + '">' +
+                    '</div>'
+            })
+            $box.html(html)
+            $box.find('.filminfo-gallery__item').on('hover:enter', function () {
+                var idx = parseInt($(this).attr('data-index'), 10) || 0
+                openGalleryModal(movie, items, idx)
+            })
+            registerSelectors($box)
+            refreshFilminfoRow($box.closest('.filminfo-section'))
+            syncFull()
+        }
+
+        function addPage(page) {
+            if (page > MAX_GALLERY_PAGES || items.length >= MAX_GALLERY_ITEMS) {
+                render()
+                return
+            }
+            fetchImages(kpId, page, function (json) {
+                if (!json || !json.items || !json.items.length) {
+                    if (!items.length) {
+                        $box.html(msgHtml(json ? T('filminfo_no_gallery') : T('filminfo_error')))
+                        syncFull()
+                        return
+                    }
+                    render()
+                    return
+                }
+                items = items.concat(json.items)
+                if (items.length > MAX_GALLERY_ITEMS) items = items.slice(0, MAX_GALLERY_ITEMS)
+                addPage(page + 1)
+            })
+        }
+
+        addPage(1)
+    }
+
+    function openGalleryModal(movie, items, startIndex) {
+        var controller = currentController()
+        var idx = Math.max(0, Math.min(startIndex || 0, items.length - 1))
+
+        var $img = $('<img>')
+        var $counter = $('<div class="filminfo-gallery-modal__counter"></div>')
+
+        function render() {
+            var item = items[idx]
+            $img.attr('src', item.image || item.previewUrl)
+            $counter.text((idx + 1) + ' / ' + items.length)
+        }
+
+        function prev() {
+            if (idx > 0) {
+                idx--
+                render()
+            }
+        }
+
+        function next() {
+            if (idx < items.length - 1) {
+                idx++
+                render()
+            }
+        }
+
+        var $modal = $('<div class="filminfo-gallery-modal">' +
+            '<div class="filminfo-gallery-modal__img"></div>' +
+            '<div class="filminfo-gallery-modal__nav"></div>' +
+            '</div>')
+
+        $modal.find('.filminfo-gallery-modal__img').append($img)
+        $modal.find('.filminfo-gallery-modal__nav').append($counter)
+
+        Lampa.Modal.open({
+            title: (movie.title || movie.name || ''),
+            size: 'large',
+            mask: true,
+            html: $modal,
+            onBack: function () {
+                Lampa.Modal.close()
+                Lampa.Controller.toggle(controller)
+            }
+        })
+
+        try {
+            Lampa.Controller.add('filminfo_gallery', {
+                left: prev,
+                right: next,
+                up: prev,
+                down: next,
+                back: function () {
+                    Lampa.Modal.close()
+                    Lampa.Controller.toggle(controller)
+                }
+            })
+            Lampa.Controller.toggle('filminfo_gallery')
+        } catch (e) {}
+
+        render()
+    }
+
+    function renderActor(p, $photo, $info) {
+        if (p.posterUrl) {
+            $photo.html('<img loading="lazy" src="' + esc(p.posterUrl) + '">')
+        }
+
+        var html = ''
+        var name = p.nameRu || p.nameEn || p.nameOriginal || ''
+        if (name) html += '<div class="filminfo-actor__name">' + esc(name) + '</div>'
+
+        var facts = []
+        if (p.growth) facts.push([T('filminfo_actor_growth'), esc(p.growth)])
+        if (p.birthday) facts.push([T('filminfo_actor_birthday'), esc(formatDate(p.birthday))])
+        if (p.birthplace) facts.push([T('filminfo_actor_birthplace'), esc(p.birthplace)])
+        if (p.death) facts.push([T('filminfo_actor_death'), esc(formatDate(p.death))])
+        if (p.deathplace) facts.push([T('filminfo_actor_deathplace'), esc(p.deathplace)])
+        if (p.spouse) facts.push([T('filminfo_actor_spouse'), esc(p.spouse)])
+        if (p.children) facts.push([T('filminfo_actor_children'), esc(p.children)])
+
+        if (facts.length) {
+            html += '<div class="filminfo-actor__facts">'
+            facts.forEach(function (f) {
+                html += '<div class="filminfo-actor__fact">' +
+                    '<div class="filminfo-actor__fact-name">' + f[0] + '</div>' +
+                    '<div class="filminfo-actor__fact-value">' + f[1] + '</div>' +
+                    '</div>'
+            })
+            html += '</div>'
+        }
+
+        if (p.facts && p.facts.length) {
+            html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_facts')) + '</div>'
+            html += '<div class="filminfo-actor__facts-text">' + esc(p.facts.join(' ')) + '</div>'
+        }
+
+        var films = (p.films || []).slice()
+        var actorFilms = films.filter(function (f) {
+            return f && f.professionKey == 'ACTOR'
+        })
+        if (actorFilms.length) films = actorFilms
+        films = films.slice(0, MAX_FILMOGRAPHY)
+
+        if (films.length) {
+            html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_filmography')) + '</div>'
+            html += '<div class="filminfo-filmography">'
+            films.forEach(function (f) {
+                var fname = (f.nameRu || f.nameEn || '').trim()
+                if (!fname) return
+                html += '<div class="filminfo-filmography__item">' +
+                    '<span class="filminfo-filmography__year">' + (f.year ? esc(f.year) : '') + '</span>' +
+                    '<span>' + esc(fname) + '</span>' +
+                    '</div>'
+            })
+            html += '</div>'
+        }
+
+        $info.html(html)
+    }
+
+    function loadActor(movie, $section) {
+        var $photo = $section.find('.filminfo-actor__photo')
+        var $info = $section.find('.filminfo-actor__info')
+        $info.html(loadingHtml())
+
+        resolveKpPersonId(movie, function (res) {
+            if (!res || !res.id) {
+                var msg
+                if (res && res.error == 'auth') msg = T('filminfo_error_auth')
+                else if (res && res.error == 'network') msg = T('filminfo_error')
+                else msg = T('filminfo_not_found_kp')
+                $info.html(msgHtml(msg))
+                syncFull()
+                return
+            }
+
+            fetchPerson(res.id, function (person) {
+                if (!person) {
+                    $info.html(msgHtml(T('filminfo_error')))
+                    syncFull()
+                    return
+                }
+                renderActor(person, $photo, $info)
+                syncFull()
+            })
+        })
+    }
+
+    function handlePersonPage(movie, e, $body) {
+        if ($body.find('.filminfo-section').length) return
+
+        var showActor = setting('filminfo_actor_info', true)
+        if (!showActor) return
+
+        var $descr = $body.find('.full-descr').closest('.items-line')
+        if (!$descr.length) $descr = $body.find('.items-line').eq(1)
+        if (!$descr.length) return
+
+        var $section = $(sectionHtml(actorBlockHtml(), T('filminfo_actor_section')))
+        $descr.after($section)
+
+        var registered = registerFilminfoRow(e.link, $section)
+        if (!registered) registerSelectors($section)
+
+        syncFull()
+
+        var token = getToken()
+        if (!token) {
+            $section.find('.filminfo-actor__info').html(msgHtml(T('filminfo_no_token')))
+            return
+        }
+
+        loadActor(movie, $section)
+    }
+
     function currentController() {
         try {
             return Lampa.Controller.enabled().name
@@ -601,7 +1077,7 @@
             if (!it || typeof it.render != 'function') continue
             try {
                 var el = it.render(true)
-                if (el && el.querySelector && el.querySelector('.full-descr')) return i
+                if (el && el.querySelector && (el.querySelector('.full-descr') || el.querySelector('.full-person__description'))) return i
             } catch (e) {}
         }
         return -1
@@ -849,11 +1325,19 @@
 
         var $body = $(e.body)
         if (!$body.length) return
+
+        if (movie.type == 'person' || movie.type == 'people') {
+            handlePersonPage(movie, e, $body)
+            return
+        }
+
         if ($body.find('.filminfo-section').length) return
 
         var showBoxOffice = setting('filminfo_box_office', true)
         var showReviews = setting('filminfo_reviews', true)
-        if (!showBoxOffice && !showReviews) return
+        var showAwards = setting('filminfo_awards', true)
+        var showGallery = setting('filminfo_gallery', true)
+        if (!showBoxOffice && !showReviews && !showAwards && !showGallery) return
 
         var $descr = $body.find('.full-descr').closest('.items-line')
         if (!$descr.length) $descr = $body.find('.items-line').eq(1)
@@ -861,7 +1345,9 @@
 
         var bodyHtml = ''
         if (showBoxOffice) bodyHtml += boxOfficeBlockHtml()
+        if (showAwards) bodyHtml += awardsBlockHtml()
         if (showReviews) bodyHtml += reviewsBlockHtml()
+        if (showGallery) bodyHtml += galleryBlockHtml()
 
         var $section = $(sectionHtml(bodyHtml))
         $descr.after($section)
@@ -871,13 +1357,9 @@
 
         syncFull()
 
-        var $boStats = showBoxOffice ? $section.find('.filminfo-stats') : null
-        var $rvList = showReviews ? $section.find('.filminfo-reviews-list') : null
-
         var token = getToken()
         if (!token) {
-            if ($boStats) $boStats.html(msgHtml(T('filminfo_no_token')))
-            if ($rvList) $rvList.html(msgHtml(T('filminfo_no_token')))
+            $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list, .filminfo-gallery').html(msgHtml(T('filminfo_no_token')))
             return
         }
 
@@ -887,13 +1369,22 @@
                 if (res && res.error == 'auth') msg = T('filminfo_error_auth')
                 else if (res && res.error == 'network') msg = T('filminfo_error')
                 else msg = T('filminfo_not_found_kp')
-                if ($boStats) $boStats.html(msgHtml(msg))
-                if ($rvList) $rvList.html(msgHtml(msg))
+                $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list, .filminfo-gallery').html(msgHtml(msg))
                 return
             }
 
-            if ($boStats) loadBoxOffice(res.id, $boStats)
-            if ($rvList) loadReviewsPreview(movie, res.id, $rvList)
+            try { Lampa.Storage.set('filminfo_last_kp_film', { id: res.id }) } catch (e2) {}
+
+            if (showBoxOffice) loadBoxOffice(res.id, $section.find('.filminfo-stats'))
+            if (showAwards) loadAwards(res.id, $section.find('.filminfo-awards'))
+            if (showReviews) loadReviewsPreview(movie, res.id, $section.find('.filminfo-reviews-list'))
+            if (showGallery) loadGallery(res.id, $section.find('.filminfo-gallery'), movie)
+
+            if (setting('filminfo_actor_info', true)) {
+                fetchStaff(res.id, function (staff) {
+                    if (Array.isArray(staff) && staff.length) cachePersons(staff)
+                })
+            }
         })
     }
 
