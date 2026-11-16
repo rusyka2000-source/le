@@ -71,7 +71,7 @@
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
-            param: { name: 'filminfo_token', type: 'input', default: DEFAULT_TOKEN },
+            param: { name: 'filminfo_token', type: 'input', default: DEFAULT_TOKEN, values: '' },
             field: {
                 name: Lampa.Lang.translate('filminfo_set_token'),
                 description: Lampa.Lang.translate('filminfo_set_token_desc')
@@ -92,7 +92,7 @@
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
-            param: { name: 'filminfo_proxy', type: 'input', default: '' },
+            param: { name: 'filminfo_proxy', type: 'input', default: '', values: '' },
             field: {
                 name: Lampa.Lang.translate('filminfo_set_proxy'),
                 description: Lampa.Lang.translate('filminfo_set_proxy_desc')
