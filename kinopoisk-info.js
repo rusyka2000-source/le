@@ -192,6 +192,7 @@
             '.filminfo-award__result--nom{color:#ffc107;border:1px solid rgba(255,193,7,0.5)}' +
             '.filminfo-award__cat{opacity:0.75;font-size:0.95em;flex-basis:100%}' +
             '.filminfo-actor{display:flex;gap:1.5em;flex-wrap:wrap}' +
+            '.filminfo-actor.focus{background:rgba(255,255,255,0.05);border-radius:0.8em;outline:0.2em solid #fff;outline-offset:-0.2em}' +
             '.filminfo-actor__photo{flex:0 0 13em;width:13em;height:18em;border-radius:0.8em;overflow:hidden;background:rgba(0,0,0,0.25)}' +
             '.filminfo-actor__photo img{width:100%;height:100%;object-fit:cover;display:block}' +
             '.filminfo-actor__info{flex:1 1 26em;min-width:0}' +
@@ -609,7 +610,7 @@
     }
 
     function actorBlockHtml() {
-        return '<div class="filminfo-row filminfo-actor">' +
+        return '<div class="filminfo-row filminfo-actor selector">' +
             '<div class="filminfo-actor__photo"></div>' +
             '<div class="filminfo-actor__info"></div>' +
             '</div>'
@@ -782,7 +783,16 @@
 
     function renderActor(p, $photo, $info) {
         if (p.posterUrl) {
-            $photo.html('<img src="' + esc(p.posterUrl) + '">')
+            var $img = $('<img>')
+            $img.attr('src', esc(p.posterUrl))
+            var alt = p.posterUrl.match(/kinopoiskapiunofficial\.tech\/images\/actor_posters\/kp\/(\d+)\.jpg/i)
+            if (alt) {
+                $img.on('error', function () {
+                    $img.off('error')
+                    $img.attr('src', 'https://st.kp.yandex.net/images/actor_iphone/iphone360_' + alt[1] + '.jpg')
+                })
+            }
+            $photo.html($img)
         }
 
         var html = ''
