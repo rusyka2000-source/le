@@ -15,7 +15,7 @@
 
     var manifest = {
         type: 'video',
-        version: '1.0.1',
+        version: '1.0.2',
         name: 'Кинопоиск: сборы и комментарии',
         description: 'Кассовые сборы и комментарии с Кинопоиска на странице фильма',
         component: 'kinopoisk_info'
@@ -687,10 +687,33 @@
             })
             comp.items.splice(insertAt, 0, item)
             comp.rows.splice(insertAt, 0, 'filminfo')
+            bindFilminfoScrollFollow($section, comp)
             return true
         } catch (e) {
             return false
         }
+    }
+
+    function bindFilminfoScrollFollow($row, comp) {
+        try {
+            if (typeof Navigator == 'undefined' || !Navigator || typeof Navigator.follow != 'function') return
+            Navigator.follow('focus', function (event) {
+                var el = event && event.elem
+                if (!el || !el.nodeType || !$row[0].contains(el)) return
+                try {
+                    var sc = comp && comp.scroll
+                    if (!sc || typeof sc.update != 'function') return
+                    var scEl = typeof sc.render == 'function' ? sc.render(true) : null
+                    if (!scEl) return
+                    var sr = scEl.getBoundingClientRect()
+                    var rect = el.getBoundingClientRect()
+                    if (!rect.width && !rect.height) return
+                    if (rect.bottom > sr.bottom || rect.top < sr.top) {
+                        sc.update(el, false)
+                    }
+                } catch (e) {}
+            })
+        } catch (e) {}
     }
 
     function refreshFilminfoRow($row) {
