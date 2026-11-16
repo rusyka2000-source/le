@@ -8,8 +8,6 @@
     var CACHE_TTL = 24 * 60 * 60 * 1000
     var MAX_ALL_PAGES = 3
     var PREVIEW_COUNT = 3
-    var MAX_GALLERY_PAGES = 3
-    var MAX_GALLERY_ITEMS = 24
     var MAX_FILMOGRAPHY = 10
     var KP_BASE = 'https://kinopoiskapiunofficial.tech'
     var BO_ORDER = { BUDGET: 0, WORLD: 1, USA: 2, RUS: 3 }
@@ -19,8 +17,8 @@
     var manifest = {
         type: 'video',
         version: '1.1.0',
-        name: 'Кинопоиск: сборы, награды, актёры и фото',
-        description: 'Сборы, награды, фото и информация об актёрах с Кинопоиска',
+        name: 'Кинопоиск: сборы, награды и актёры',
+        description: 'Сборы, награды и информация об актёрах с Кинопоиска',
         component: 'kinopoisk_info'
     }
 
@@ -30,7 +28,7 @@
 
     function translations() {
         Lampa.Lang.add({
-            filminfo_title: { ru: 'Кинопоиск: сборы, награды, актёры и фото', en: 'Kinopoisk: box office, awards, actors & photos' },
+            filminfo_title: { ru: 'Кинопоиск: сборы, награды и актёры', en: 'Kinopoisk: box office, awards & actors' },
             filminfo_box_office: { ru: 'Сборы', en: 'Box office' },
             filminfo_comments: { ru: 'Комментарии', en: 'Comments' },
             filminfo_budget: { ru: 'Бюджет', en: 'Budget' },
@@ -55,7 +53,7 @@
             filminfo_neu: { ru: 'нейтральных', en: 'neutral' },
             filminfo_neg: { ru: 'отрицательных', en: 'negative' },
             filminfo_close: { ru: 'Закрыть', en: 'Close' },
-            filminfo_settings_name: { ru: 'Кинопоиск: сборы, награды, актёры и фото', en: 'Kinopoisk: box office, awards, actors & photos' },
+            filminfo_settings_name: { ru: 'Кинопоиск: сборы, награды и актёры', en: 'Kinopoisk: box office, awards & actors' },
             filminfo_set_token: { ru: 'Токен API Кинопоиска (X-API-KEY)', en: 'Kinopoisk API token (X-API-KEY)' },
             filminfo_set_token_desc: { ru: 'Получить можно на kinopoiskapiunofficial.tech. Хранится только в настройках Lampa.', en: 'Get it at kinopoiskapiunofficial.tech. Stored only in Lampa settings.' },
             filminfo_set_boxoffice: { ru: 'Показывать сборы', en: 'Show box office' },
@@ -63,13 +61,11 @@
             filminfo_set_proxy: { ru: 'CORS-прокси (необязательно)', en: 'CORS proxy (optional)' },
             filminfo_set_proxy_desc: { ru: 'Префикс прокси, если API недоступен напрямую. Должен передавать заголовок X-API-KEY.', en: 'Proxy prefix if the API is not reachable directly. It must forward the X-API-KEY header.' },
             filminfo_set_awards: { ru: 'Показывать награды', en: 'Show awards' },
-            filminfo_set_gallery: { ru: 'Показывать фото', en: 'Show gallery' },
             filminfo_set_actor_info: { ru: 'Показывать информацию об актёрах', en: 'Show actor info' },
             filminfo_awards: { ru: 'Награды', en: 'Awards' },
-            filminfo_gallery: { ru: 'Фото', en: 'Gallery' },
             filminfo_actor_section: { ru: 'Кинопоиск: актёр', en: 'Kinopoisk: actor' },
             filminfo_no_awards: { ru: 'Нет данных о наградах', en: 'No awards data' },
-            filminfo_no_gallery: { ru: 'Фото не найдены', en: 'No photos found' },
+            filminfo_not_found_person: { ru: 'Актёр не найден на Кинопоиске', en: 'Actor not found on Kinopoisk' },
             filminfo_awards_win: { ru: 'Победа', en: 'Win' },
             filminfo_awards_nom: { ru: 'Номинация', en: 'Nomination' },
             filminfo_actor_growth: { ru: 'Рост', en: 'Height' },
@@ -116,12 +112,6 @@
             component: 'kinopoisk_info',
             param: { name: 'filminfo_awards', type: 'trigger', default: true },
             field: { name: Lampa.Lang.translate('filminfo_set_awards') }
-        })
-
-        Lampa.SettingsApi.addParam({
-            component: 'kinopoisk_info',
-            param: { name: 'filminfo_gallery', type: 'trigger', default: true },
-            field: { name: Lampa.Lang.translate('filminfo_set_gallery') }
         })
 
         Lampa.SettingsApi.addParam({
@@ -201,15 +191,6 @@
             '.filminfo-award__result--win{color:#4caf50;border:1px solid rgba(76,175,80,0.5)}' +
             '.filminfo-award__result--nom{color:#ffc107;border:1px solid rgba(255,193,7,0.5)}' +
             '.filminfo-award__cat{opacity:0.75;font-size:0.95em;flex-basis:100%}' +
-            '.filminfo-gallery{display:flex;flex-wrap:wrap;gap:0.8em}' +
-            '.filminfo-gallery__item{flex:0 0 auto;width:16em;height:9em;border-radius:0.6em;overflow:hidden;cursor:pointer;background:rgba(0,0,0,0.25)}' +
-            '.filminfo-gallery__item img{width:100%;height:100%;object-fit:cover;display:block}' +
-            '.filminfo-gallery__item.focus{outline:0.2em solid #fff;outline-offset:-0.2em}' +
-            '.filminfo-gallery-modal{height:100%;display:flex;flex-direction:column}' +
-            '.filminfo-gallery-modal__img{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}' +
-            '.filminfo-gallery-modal__img img{max-width:100%;max-height:65vh;object-fit:contain}' +
-            '.filminfo-gallery-modal__nav{display:flex;align-items:center;justify-content:center;padding-top:1em}' +
-            '.filminfo-gallery-modal__counter{opacity:0.7;font-size:1.2em}' +
             '.filminfo-actor{display:flex;gap:1.5em;flex-wrap:wrap}' +
             '.filminfo-actor__photo{flex:0 0 13em;width:13em;height:18em;border-radius:0.8em;overflow:hidden;background:rgba(0,0,0,0.25)}' +
             '.filminfo-actor__photo img{width:100%;height:100%;object-fit:cover;display:block}' +
@@ -225,7 +206,6 @@
             '.filminfo-filmography__item{display:flex;gap:1em;opacity:0.9}' +
             '.filminfo-filmography__year{opacity:0.6;min-width:3em}' +
             'body.light--version .filminfo-award{background:rgba(0,0,0,0.05)}' +
-            'body.light--version .filminfo-gallery__item{background:rgba(0,0,0,0.08)}' +
             'body.light--version .filminfo-actor__photo{background:rgba(0,0,0,0.08)}' +
             'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}'
 
@@ -491,15 +471,6 @@
         })
     }
 
-    function fetchImages(kpId, page, callback) {
-        var url = kpUrl('/api/v2.2/films/' + kpId + '/images?type=STILL&page=' + page)
-        kpGet(url, function (json) {
-            callback(json || null)
-        }, function (kind) {
-            callback(null, kind)
-        })
-    }
-
     function fetchStaff(kpId, callback) {
         var url = kpUrl('/api/v1/staff?filmId=' + kpId)
         kpGet(url, function (json) {
@@ -520,6 +491,16 @@
 
     function normalizeName(s) {
         return String(s == null ? '' : s).toLowerCase().replace(/[^a-zа-яё0-9]/gi, '')
+    }
+
+    function isPersonMovie(movie) {
+        if (!movie) return false
+        if (movie.type == 'person' || movie.type == 'people') return true
+        if (movie.type && ['film', 'tv', 'serial', 'documentary', 'anime', 'concert', 'video', 'clip', 'cartoon'].indexOf(movie.type) >= 0) return false
+        if (movie.title || movie.original_title || movie.release_date || movie.first_air_date ||
+            movie.backdrop_path || movie.poster_path || movie.vote_average || movie.kinopoisk_id ||
+            movie.year || movie.rating) return false
+        return !!(movie.name || movie.original_name)
     }
 
     function readPersons() {
@@ -553,7 +534,7 @@
     }
 
     function lookupPerson(map, person) {
-        var candidates = [person.name, person.original_name, person.title]
+        var candidates = [person.name, person.original_name, person.title, person.original_title]
         for (var i = 0; i < candidates.length; i++) {
             var n = normalizeName(candidates[i])
             if (n && map[n]) return map[n]
@@ -624,13 +605,6 @@
         return '<div class="filminfo-row">' +
             blockSubtitle(T('filminfo_awards')) +
             '<div class="filminfo-awards"></div>' +
-            '</div>'
-    }
-
-    function galleryBlockHtml() {
-        return '<div class="filminfo-row">' +
-            blockSubtitle(T('filminfo_gallery')) +
-            '<div class="filminfo-gallery"></div>' +
             '</div>'
     }
 
@@ -806,177 +780,65 @@
         })
     }
 
-    function loadGallery(kpId, $box, movie) {
-        $box.html(loadingHtml())
-
-        var items = []
-
-        function render() {
-            if (!items.length) {
-                $box.html(msgHtml(T('filminfo_no_gallery')))
-                syncFull()
-                return
-            }
-            var html = ''
-            items.forEach(function (it, i) {
-                var src = it.previewUrl || it.image
-                html += '<div class="filminfo-gallery__item selector" data-index="' + i + '">' +
-                    '<img loading="lazy" src="' + esc(src) + '">' +
-                    '</div>'
-            })
-            $box.html(html)
-            $box.find('.filminfo-gallery__item').on('hover:enter', function () {
-                var idx = parseInt($(this).attr('data-index'), 10) || 0
-                openGalleryModal(movie, items, idx)
-            })
-            registerSelectors($box)
-            refreshFilminfoRow($box.closest('.filminfo-section'))
-            syncFull()
-        }
-
-        function addPage(page) {
-            if (page > MAX_GALLERY_PAGES || items.length >= MAX_GALLERY_ITEMS) {
-                render()
-                return
-            }
-            fetchImages(kpId, page, function (json) {
-                if (!json || !json.items || !json.items.length) {
-                    if (!items.length) {
-                        $box.html(msgHtml(json ? T('filminfo_no_gallery') : T('filminfo_error')))
-                        syncFull()
-                        return
-                    }
-                    render()
-                    return
-                }
-                items = items.concat(json.items)
-                if (items.length > MAX_GALLERY_ITEMS) items = items.slice(0, MAX_GALLERY_ITEMS)
-                addPage(page + 1)
-            })
-        }
-
-        addPage(1)
-    }
-
-    function openGalleryModal(movie, items, startIndex) {
-        var controller = currentController()
-        var idx = Math.max(0, Math.min(startIndex || 0, items.length - 1))
-
-        var $img = $('<img>')
-        var $counter = $('<div class="filminfo-gallery-modal__counter"></div>')
-
-        function render() {
-            var item = items[idx]
-            $img.attr('src', item.image || item.previewUrl)
-            $counter.text((idx + 1) + ' / ' + items.length)
-        }
-
-        function prev() {
-            if (idx > 0) {
-                idx--
-                render()
-            }
-        }
-
-        function next() {
-            if (idx < items.length - 1) {
-                idx++
-                render()
-            }
-        }
-
-        var $modal = $('<div class="filminfo-gallery-modal">' +
-            '<div class="filminfo-gallery-modal__img"></div>' +
-            '<div class="filminfo-gallery-modal__nav"></div>' +
-            '</div>')
-
-        $modal.find('.filminfo-gallery-modal__img').append($img)
-        $modal.find('.filminfo-gallery-modal__nav').append($counter)
-
-        Lampa.Modal.open({
-            title: (movie.title || movie.name || ''),
-            size: 'large',
-            mask: true,
-            html: $modal,
-            onBack: function () {
-                Lampa.Modal.close()
-                Lampa.Controller.toggle(controller)
-            }
-        })
-
-        try {
-            Lampa.Controller.add('filminfo_gallery', {
-                left: prev,
-                right: next,
-                up: prev,
-                down: next,
-                back: function () {
-                    Lampa.Modal.close()
-                    Lampa.Controller.toggle(controller)
-                }
-            })
-            Lampa.Controller.toggle('filminfo_gallery')
-        } catch (e) {}
-
-        render()
-    }
-
     function renderActor(p, $photo, $info) {
         if (p.posterUrl) {
-            $photo.html('<img loading="lazy" src="' + esc(p.posterUrl) + '">')
+            $photo.html('<img src="' + esc(p.posterUrl) + '">')
         }
 
         var html = ''
-        var name = p.nameRu || p.nameEn || p.nameOriginal || ''
-        if (name) html += '<div class="filminfo-actor__name">' + esc(name) + '</div>'
+        try {
+            var name = p.nameRu || p.nameEn || p.nameOriginal || ''
+            if (name) html += '<div class="filminfo-actor__name">' + esc(name) + '</div>'
 
-        var facts = []
-        if (p.growth) facts.push([T('filminfo_actor_growth'), esc(p.growth)])
-        if (p.birthday) facts.push([T('filminfo_actor_birthday'), esc(formatDate(p.birthday))])
-        if (p.birthplace) facts.push([T('filminfo_actor_birthplace'), esc(p.birthplace)])
-        if (p.death) facts.push([T('filminfo_actor_death'), esc(formatDate(p.death))])
-        if (p.deathplace) facts.push([T('filminfo_actor_deathplace'), esc(p.deathplace)])
-        if (p.spouse) facts.push([T('filminfo_actor_spouse'), esc(p.spouse)])
-        if (p.children) facts.push([T('filminfo_actor_children'), esc(p.children)])
+            var facts = []
+            if (p.growth) facts.push([T('filminfo_actor_growth'), esc(p.growth)])
+            if (p.birthday) facts.push([T('filminfo_actor_birthday'), esc(formatDate(p.birthday))])
+            if (p.birthplace) facts.push([T('filminfo_actor_birthplace'), esc(p.birthplace)])
+            if (p.death) facts.push([T('filminfo_actor_death'), esc(formatDate(p.death))])
+            if (p.deathplace) facts.push([T('filminfo_actor_deathplace'), esc(p.deathplace)])
+            if (p.spouse) facts.push([T('filminfo_actor_spouse'), esc(p.spouse)])
+            if (p.children) facts.push([T('filminfo_actor_children'), esc(p.children)])
 
-        if (facts.length) {
-            html += '<div class="filminfo-actor__facts">'
-            facts.forEach(function (f) {
-                html += '<div class="filminfo-actor__fact">' +
-                    '<div class="filminfo-actor__fact-name">' + f[0] + '</div>' +
-                    '<div class="filminfo-actor__fact-value">' + f[1] + '</div>' +
-                    '</div>'
+            if (facts.length) {
+                html += '<div class="filminfo-actor__facts">'
+                facts.forEach(function (f) {
+                    html += '<div class="filminfo-actor__fact">' +
+                        '<div class="filminfo-actor__fact-name">' + f[0] + '</div>' +
+                        '<div class="filminfo-actor__fact-value">' + f[1] + '</div>' +
+                        '</div>'
+                })
+                html += '</div>'
+            }
+
+            var factsList = Array.isArray(p.facts) ? p.facts : (typeof p.facts == 'string' && p.facts ? [p.facts] : [])
+            if (factsList.length) {
+                html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_facts')) + '</div>'
+                html += '<div class="filminfo-actor__facts-text">' + esc(factsList.join(' ')) + '</div>'
+            }
+
+            var films = (p.films || []).slice()
+            var actorFilms = films.filter(function (f) {
+                return f && f.professionKey == 'ACTOR'
             })
-            html += '</div>'
-        }
+            if (actorFilms.length) films = actorFilms
+            films = films.slice(0, MAX_FILMOGRAPHY)
 
-        if (p.facts && p.facts.length) {
-            html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_facts')) + '</div>'
-            html += '<div class="filminfo-actor__facts-text">' + esc(p.facts.join(' ')) + '</div>'
-        }
+            if (films.length) {
+                html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_filmography')) + '</div>'
+                html += '<div class="filminfo-filmography">'
+                films.forEach(function (f) {
+                    var fname = (f.nameRu || f.nameEn || '').trim()
+                    if (!fname) return
+                    html += '<div class="filminfo-filmography__item">' +
+                        '<span class="filminfo-filmography__year">' + (f.year ? esc(f.year) : '') + '</span>' +
+                        '<span>' + esc(fname) + '</span>' +
+                        '</div>'
+                })
+                html += '</div>'
+            }
+        } catch (e) {}
 
-        var films = (p.films || []).slice()
-        var actorFilms = films.filter(function (f) {
-            return f && f.professionKey == 'ACTOR'
-        })
-        if (actorFilms.length) films = actorFilms
-        films = films.slice(0, MAX_FILMOGRAPHY)
-
-        if (films.length) {
-            html += '<div class="filminfo-actor__facts-title">' + esc(T('filminfo_actor_filmography')) + '</div>'
-            html += '<div class="filminfo-filmography">'
-            films.forEach(function (f) {
-                var fname = (f.nameRu || f.nameEn || '').trim()
-                if (!fname) return
-                html += '<div class="filminfo-filmography__item">' +
-                    '<span class="filminfo-filmography__year">' + (f.year ? esc(f.year) : '') + '</span>' +
-                    '<span>' + esc(fname) + '</span>' +
-                    '</div>'
-            })
-            html += '</div>'
-        }
-
-        $info.html(html)
+        $info.html(html || msgHtml(T('filminfo_error')))
     }
 
     function loadActor(movie, $section) {
@@ -989,7 +851,7 @@
                 var msg
                 if (res && res.error == 'auth') msg = T('filminfo_error_auth')
                 else if (res && res.error == 'network') msg = T('filminfo_error')
-                else msg = T('filminfo_not_found_kp')
+                else msg = T('filminfo_not_found_person')
                 $info.html(msgHtml(msg))
                 syncFull()
                 return
@@ -1013,16 +875,18 @@
         var showActor = setting('filminfo_actor_info', true)
         if (!showActor) return
 
-        var $descr = $body.find('.full-descr').closest('.items-line')
-        if (!$descr.length) $descr = $body.find('.items-line').eq(1)
-        if (!$descr.length) return
-
         var $section = $(sectionHtml(actorBlockHtml(), T('filminfo_actor_section')))
-        $descr.after($section)
 
-        var registered = registerFilminfoRow(e.link, $section)
-        if (!registered) registerSelectors($section)
+        var $descr = $body.find('.full-descr, .full-person__description').first().closest('.items-line')
+        if ($descr.length) {
+            $descr.after($section)
+        } else {
+            var $first = $body.find('.items-line').first()
+            if ($first.length) $first.before($section)
+            else $body.append($section)
+        }
 
+        registerSelectors($section)
         syncFull()
 
         var token = getToken()
@@ -1326,7 +1190,7 @@
         var $body = $(e.body)
         if (!$body.length) return
 
-        if (movie.type == 'person' || movie.type == 'people') {
+        if (isPersonMovie(movie)) {
             handlePersonPage(movie, e, $body)
             return
         }
@@ -1336,8 +1200,7 @@
         var showBoxOffice = setting('filminfo_box_office', true)
         var showReviews = setting('filminfo_reviews', true)
         var showAwards = setting('filminfo_awards', true)
-        var showGallery = setting('filminfo_gallery', true)
-        if (!showBoxOffice && !showReviews && !showAwards && !showGallery) return
+        if (!showBoxOffice && !showReviews && !showAwards) return
 
         var $descr = $body.find('.full-descr').closest('.items-line')
         if (!$descr.length) $descr = $body.find('.items-line').eq(1)
@@ -1347,7 +1210,6 @@
         if (showBoxOffice) bodyHtml += boxOfficeBlockHtml()
         if (showAwards) bodyHtml += awardsBlockHtml()
         if (showReviews) bodyHtml += reviewsBlockHtml()
-        if (showGallery) bodyHtml += galleryBlockHtml()
 
         var $section = $(sectionHtml(bodyHtml))
         $descr.after($section)
@@ -1359,7 +1221,7 @@
 
         var token = getToken()
         if (!token) {
-            $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list, .filminfo-gallery').html(msgHtml(T('filminfo_no_token')))
+            $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(T('filminfo_no_token')))
             return
         }
 
@@ -1369,7 +1231,7 @@
                 if (res && res.error == 'auth') msg = T('filminfo_error_auth')
                 else if (res && res.error == 'network') msg = T('filminfo_error')
                 else msg = T('filminfo_not_found_kp')
-                $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list, .filminfo-gallery').html(msgHtml(msg))
+                $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(msg))
                 return
             }
 
@@ -1378,7 +1240,6 @@
             if (showBoxOffice) loadBoxOffice(res.id, $section.find('.filminfo-stats'))
             if (showAwards) loadAwards(res.id, $section.find('.filminfo-awards'))
             if (showReviews) loadReviewsPreview(movie, res.id, $section.find('.filminfo-reviews-list'))
-            if (showGallery) loadGallery(res.id, $section.find('.filminfo-gallery'), movie)
 
             if (setting('filminfo_actor_info', true)) {
                 fetchStaff(res.id, function (staff) {
