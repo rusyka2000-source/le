@@ -15,7 +15,7 @@
 
     var manifest = {
         type: 'video',
-        version: '1.0.0',
+        version: '1.0.1',
         name: 'Кинопоиск: сборы и комментарии',
         description: 'Кассовые сборы и комментарии с Кинопоиска на странице фильма',
         component: 'kinopoisk_info'
@@ -552,6 +552,7 @@
             })
             $list.append($btn)
             registerSelectors($list)
+            refreshFilminfoRow($list.closest('.filminfo-section'))
 
             syncFull()
         })
@@ -589,6 +590,120 @@
             })
             if (!$els.length) return
             Lampa.Controller.collectionAppend($els)
+        } catch (e) {}
+    }
+
+    function findDescriptionIndex(comp) {
+        var items = comp && comp.items
+        if (!Array.isArray(items)) return -1
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i]
+            if (!it || typeof it.render != 'function') continue
+            try {
+                var el = it.render(true)
+                if (el && el.querySelector && el.querySelector('.full-descr')) return i
+            } catch (e) {}
+        }
+        return -1
+    }
+
+    function makeFilminfoRowItem($html, comp) {
+        return {
+            html: $html,
+            last: null,
+            use: function (handlers) {
+                for (var key in handlers) {
+                    if (Object.prototype.hasOwnProperty.call(handlers, key)) this[key] = handlers[key]
+                }
+            },
+            create: function () {},
+            render: function (js) {
+                return js ? this.html[0] : this.html
+            },
+            toggle: function () {
+                var self = this
+                try {
+                    comp.active = comp.items.indexOf(self)
+                    comp.scroll.update(self.render(true))
+                } catch (e) {}
+                Lampa.Controller.add('filminfo_row', {
+                    link: self,
+                    toggle: function () {
+                        Lampa.Controller.collectionSet(self.html)
+                        Lampa.Controller.collectionFocus(self.last, self.html)
+                    },
+                    right: function () {
+                        Navigator.move('right')
+                    },
+                    left: function () {
+                        if (Navigator.canmove('left')) Navigator.move('left')
+                        else if (self.onLeft) self.onLeft()
+                    },
+                    down: function () {
+                        if (Navigator.canmove('down')) Navigator.move('down')
+                        else if (self.onDown) self.onDown()
+                    },
+                    up: function () {
+                        if (Navigator.canmove('up')) Navigator.move('up')
+                        else if (self.onUp) self.onUp()
+                    },
+                    back: function () {
+                        if (self.onBack) self.onBack()
+                        else {
+                            try {
+                                Lampa.Activity.backward()
+                            } catch (e) {}
+                        }
+                    }
+                })
+                Lampa.Controller.toggle('filminfo_row')
+            },
+            destroy: function () {
+                this.html.remove()
+            }
+        }
+    }
+
+    function registerFilminfoRow(comp, $section) {
+        try {
+            if (!comp || !Array.isArray(comp.items) || !Array.isArray(comp.rows) || typeof comp.emit != 'function') return false
+            var descIndex = findDescriptionIndex(comp)
+            if (descIndex < 0) return false
+            var insertAt = descIndex + 1
+            var item = makeFilminfoRowItem($section, comp)
+            item.use({
+                onDown: comp.emit.bind(comp, 'down'),
+                onUp: comp.emit.bind(comp, 'up'),
+                onBack: comp.emit.bind(comp, 'back'),
+                onLeft: comp.emit.bind(comp, 'left'),
+                onActive: function () {
+                    comp.active = comp.items.indexOf(item)
+                },
+                onToggle: function () {
+                    try {
+                        comp.scroll.update(item.render(true))
+                    } catch (e) {}
+                }
+            })
+            comp.items.splice(insertAt, 0, item)
+            comp.rows.splice(insertAt, 0, 'filminfo')
+            return true
+        } catch (e) {
+            return false
+        }
+    }
+
+    function refreshFilminfoRow($row) {
+        try {
+            if (!$row || !$row.length) return
+            if (Lampa.Controller.enabled().name != 'filminfo_row') return
+            var target = null
+            try {
+                var focused = Navigator.getFocusedElement()
+                if (focused && focused.offsetParent && $row[0].contains(focused)) target = focused
+            } catch (e) {}
+            Lampa.Controller.collectionSet($row)
+            Lampa.Controller.collectionFocus(target, $row)
         } catch (e) {}
     }
 
@@ -727,7 +842,10 @@
 
         var $section = $(sectionHtml(bodyHtml))
         $descr.after($section)
-        registerSelectors($section)
+
+        var registered = registerFilminfoRow(e.link, $section)
+        if (!registered) registerSelectors($section)
+
         syncFull()
 
         var $boStats = showBoxOffice ? $section.find('.filminfo-stats') : null
