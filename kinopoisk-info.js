@@ -494,10 +494,12 @@
         fetchBoxOffice(kpId, function (items, kind) {
             if (!items) {
                 $stats.html(msgHtml(kind == 'auth' ? T('filminfo_error_auth') : T('filminfo_error')))
+                syncFull()
                 return
             }
             if (!items.length) {
                 $stats.html(msgHtml(T('filminfo_no_data')))
+                syncFull()
                 return
             }
 
@@ -512,6 +514,7 @@
                 html += statHtml(boxOfficeName(it.type), moneyHtml(it))
             })
             $stats.html(html)
+            syncFull()
         })
     }
 
@@ -521,12 +524,14 @@
         fetchReviews(kpId, 1, function (json, kind) {
             if (!json) {
                 $list.html(msgHtml(kind == 'auth' ? T('filminfo_error_auth') : T('filminfo_error')))
+                syncFull()
                 return
             }
 
             var items = json.items || []
             if (!items.length) {
                 $list.html(msgHtml(T('filminfo_no_reviews')))
+                syncFull()
                 return
             }
 
@@ -546,6 +551,8 @@
                 openAllReviewsModal(movie, kpId, json)
             })
             $list.append($btn)
+
+            syncFull()
         })
     }
 
@@ -564,6 +571,12 @@
         } catch (e) {
             return true
         }
+    }
+
+    function syncFull() {
+        try {
+            Lampa.Activity.active().activity.toggle()
+        } catch (e) {}
     }
 
     function restoreController(name) {
@@ -701,6 +714,7 @@
 
         var $section = $(sectionHtml(bodyHtml))
         $descr.after($section)
+        syncFull()
 
         var $boStats = showBoxOffice ? $section.find('.filminfo-stats') : null
         var $rvList = showReviews ? $section.find('.filminfo-reviews-list') : null
