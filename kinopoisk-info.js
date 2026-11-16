@@ -551,6 +551,7 @@
                 openAllReviewsModal(movie, kpId, json)
             })
             $list.append($btn)
+            registerSelectors($list)
 
             syncFull()
         })
@@ -576,6 +577,18 @@
     function syncFull() {
         try {
             Lampa.Activity.active().activity.toggle()
+        } catch (e) {}
+    }
+
+    function registerSelectors($root) {
+        try {
+            if (!Lampa.Controller || typeof Lampa.Controller.collectionAppend != 'function') return
+            if (!$root || !$root.length) return
+            var $els = $root.find('.selector').filter(function () {
+                return this.offsetParent !== null
+            })
+            if (!$els.length) return
+            Lampa.Controller.collectionAppend($els)
         } catch (e) {}
     }
 
@@ -714,6 +727,7 @@
 
         var $section = $(sectionHtml(bodyHtml))
         $descr.after($section)
+        registerSelectors($section)
         syncFull()
 
         var $boStats = showBoxOffice ? $section.find('.filminfo-stats') : null
