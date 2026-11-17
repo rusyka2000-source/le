@@ -177,6 +177,7 @@
             '.filminfo-dot{width:0.7em;height:0.7em;border-radius:100%;display:inline-block}' +
             '.filminfo-btn{display:inline-block;align-self:flex-start;flex-basis:100%;margin-top:0.5em;padding:0.6em 1.4em;font-size:1.2em;background:rgba(0,0,0,0.25);border-radius:2em;cursor:pointer}' +
             '.filminfo-btn.focus{background:#fff;color:#000}' +
+            '.filminfo-stat.focus{background:rgba(255,255,255,0.14);outline:0.2em solid #fff;outline-offset:-0.2em}' +
             '.filminfo-message{opacity:0.7;font-size:1.2em}' +
             '.filminfo-loading{opacity:0.5}' +
             '.filminfo-modal{font-size:1.05em}' +
@@ -200,6 +201,7 @@
             '.filminfo-all-review.open .filminfo-all-review__body{display:block}' +
             '.filminfo-all__note{opacity:0.6;margin-top:1.5em;font-size:1.05em}' +
             'body.light--version .filminfo-stat{background:rgba(0,0,0,0.05)}' +
+            'body.light--version .filminfo-stat.focus{background:rgba(0,0,0,0.14)}' +
             'body.light--version .filminfo-btn{background:rgba(0,0,0,0.08)}' +
             'body.light--version .filminfo-btn.focus{background:#000;color:#fff}' +
             'body.light--version .filminfo-all-review{border-bottom-color:rgba(0,0,0,0.1)}' +
@@ -647,7 +649,7 @@
     }
 
     function statHtml(name, value) {
-        return '<div class="filminfo-stat">' +
+        return '<div class="filminfo-stat selector">' +
             '<div class="filminfo-stat__name">' + esc(name) + '</div>' +
             '<div class="filminfo-stat__value">' + value + '</div>' +
             '</div>'
@@ -717,6 +719,8 @@
                 html += statHtml(boxOfficeName(it.type), moneyHtml(it))
             })
             $stats.html(html)
+            registerSelectors($stats)
+            refreshFilminfoRow($stats.closest('.filminfo-section'))
             syncFull()
         })
     }
