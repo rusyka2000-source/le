@@ -243,8 +243,7 @@
             'body.light--version .filminfo-award{background:rgba(0,0,0,0.05)}' +
             'body.light--version .filminfo-award.focus{background:rgba(0,0,0,0.14)}' +
             'body.light--version .filminfo-actor__photo{background:rgba(0,0,0,0.08)}' +
-            'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}' +
-            '.filminfo-trailers{display:flex;flex-wrap:wrap;gap:1em}'
+            'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}'
 
         $('<style id="filminfo-style">').html(css).appendTo('head')
     }
@@ -1399,34 +1398,12 @@
         next(2)
     }
 
-    function trailerIconSvg() {
-        return '<svg height="70" viewBox="0 0 80 70" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-            '<path fill-rule="evenodd" clip-rule="evenodd" d="M71.2555 2.08955C74.6975 3.2397 77.4083 6.62804 78.3283 10.9306C80 18.7291 80 35 80 35C80 35 80 51.2709 78.3283 59.0694C77.4083 63.372 74.6975 66.7603 71.2555 67.9104C65.0167 70 40 70 40 70C40 70 14.9833 70 8.74453 67.9104C5.3025 66.7603 2.59172 63.372 1.67172 59.0694C0 51.2709 0 35 0 35C0 35 0 18.7291 1.67172 10.9306C2.59172 6.62804 5.3025 3.2395 8.74453 2.08955C14.9833 0 40 0 40 0C40 0 65.0167 0 71.2555 2.08955ZM55.5909 35.0004L29.9773 49.5714V20.4286L55.5909 35.0004Z" fill="currentColor"></path>' +
+    function trailerBtnIcon() {
+        return '<svg class="filminfo-trailer-btn__icon" width="239" height="239" viewBox="0 0 239 239" fill="currentColor" xmlns="http://www.w3.org/2000/svg" xml:space="preserve">' +
+            '<path fill="currentColor" d="M215 121.415l-99.297-6.644 90.943 36.334a106.416 106.416 0 0 0 8.354-29.69z" />' +
+            '<path fill="currentColor" d="M194.608 171.609C174.933 197.942 143.441 215 107.948 215 48.33 215 0 166.871 0 107.5 0 48.13 48.33 0 107.948 0c35.559 0 67.102 17.122 86.77 43.539l-90.181 48.07L162.57 32.25h-32.169L90.892 86.862V32.25H64.77v150.5h26.123v-54.524l39.509 54.524h32.169l-56.526-57.493 88.564 46.352z" />' +
+            '<path d="M206.646 63.895l-90.308 36.076L215 93.583a106.396 106.396 0 0 0-8.354-29.688z" fill="currentColor" />' +
             '</svg>'
-    }
-
-    function addTrailersButton(movie, kpId, $body) {
-        try {
-            if (!$body || !$body.length || !kpId) return
-            var $cont = $body.find('.full-start-new__buttons, .full-start__buttons').first()
-            if (!$cont || !$cont.length) return
-            if ($cont.find('.filminfo-trailer-btn').length) return
-
-            var $btn = $('<div class="full-start__button selector filminfo-trailer-btn">' +
-                trailerIconSvg() +
-                '<span>' + esc(T('filminfo_trailers')) + '</span>' +
-                '</div>')
-
-            $btn.on('hover:enter', function () {
-                openKpTrailers(movie, kpId)
-            })
-
-            $cont.append($btn)
-
-            try {
-                if (Lampa.Controller && typeof Lampa.Controller.collectionAppend == 'function') Lampa.Controller.collectionAppend($btn)
-            } catch (e) {}
-        } catch (e) {}
     }
 
     function trailerVideoId(t) {
@@ -1436,57 +1413,68 @@
         return m ? m[1] : ''
     }
 
-    function playTrailer(t) {
-        var videoId = trailerVideoId(t)
-        if (!videoId) {
-            openExternal(String(t.url || ''))
-            return
-        }
-        var url = 'https://www.youtube.com/watch?v=' + videoId
-        var data = {
-            title: (t.name || '').trim() || T('filminfo_trailer'),
-            url: url
-        }
+    function displayTrailers(movie, kpId, $body) {
         try {
-            if (typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') Lampa.Player.play(data)
-            else openExternal(url)
-        } catch (e) {
-            openExternal(url)
-        }
-    }
+            if (!kpId) return
+            fetchVideos(kpId, function (items) {
+                if (!items || !items.length) return
+                if (!$body || !$body.length) return
+                var $cont = $body.find('.full-start-new__buttons, .full-start__buttons').first()
+                if (!$cont || !$cont.length) return
+                if ($cont.find('.button--kinopoisk_trailers, .filminfo-trailer-btn').length) return
 
-    function showTrailersModal(movie, items, kind, controller) {
-        var $html = $('<div class="filminfo-modal filminfo-trailers"></div>')
+                var kinopoisk_trailers = items.map(function (t) {
+                    var videoId = trailerVideoId(t)
+                    if (!videoId) return null
+                    return {
+                        title: (t.name || '').trim() || T('filminfo_trailer'),
+                        url: 'https://www.youtube.com/watch?v=' + videoId,
+                        icon: '<img class="size-youtube" src="https://img.youtube.com/vi/' + videoId + '/default.jpg">'
+                    }
+                }).filter(function (a) { return a })
 
-        if (!items || !items.length) {
-            var msg = kind == 'auth' ? T('filminfo_error_auth') : (kind == 'network' ? T('filminfo_error') : T('filminfo_no_trailers'))
-            $html.append('<div class="filminfo-message">' + esc(msg) + '</div>')
-        } else {
-            items.forEach(function (t) {
-                var name = (t.name || '').trim() || T('filminfo_trailer')
-                var $btn = $('<div class="filminfo-btn selector filminfo-trailer">' + esc(name) + '</div>')
+                if (!kinopoisk_trailers.length) return
+
+                $cont.append('<div class="full-start__button selector filminfo-trailer-btn">' +
+                    trailerBtnIcon() +
+                    '<span>' + esc(T('filminfo_trailers')) + '</span>' +
+                    '</div>')
+
+                var $btn = $cont.find('.filminfo-trailer-btn').last()
+
                 $btn.on('hover:enter', function () {
-                    restoreController(controller)
-                    playTrailer(t)
+                    var trailers = kinopoisk_trailers.map(function (a) {
+                        return {
+                            title: a.title,
+                            url: a.url,
+                            icon: a.icon,
+                            template: 'selectbox_icon'
+                        }
+                    })
+
+                    try {
+                        if (typeof Lampa.Select != 'undefined' && typeof Lampa.Select.show == 'function') {
+                            Lampa.Select.show({
+                                title: 'Трейлеры Кинопоиск',
+                                items: trailers,
+                                onSelect: function (a) {
+                                    if (a && a.url && typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') Lampa.Player.play(a)
+                                },
+                                onBack: function () {
+                                    try { Lampa.Controller.toggle('full_start') } catch (e2) {}
+                                }
+                            })
+                        } else if (trailers.length && typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') {
+                            Lampa.Player.play(trailers[0])
+                        }
+                    } catch (e) {}
                 })
-                $html.append($btn)
+
+                try {
+                    if (Lampa.Controller && typeof Lampa.Controller.collectionAppend == 'function') Lampa.Controller.collectionAppend($btn)
+                } catch (e) {}
             })
-        }
-
-        var params = modalBase(movie)
-        params.html = $html
-        params.buttons[0].onSelect = function () { restoreController(controller) }
-        params.onBack = function () { restoreController(controller) }
-        Lampa.Modal.open(params)
-    }
-
-    function openKpTrailers(movie, kpId) {
-        var controller = currentController()
-
-        fetchVideos(kpId, function (items, kind) {
-            if (!pageStillActive(movie)) return
-            showTrailersModal(movie, items, kind, controller)
-        })
+        } catch (e) {}
     }
 
     function onFull(e) {
@@ -1555,7 +1543,7 @@
 
             try { Lampa.Storage.set('filminfo_last_kp_film', { id: res.id }) } catch (e2) {}
 
-            if (showTrailers) addTrailersButton(movie, res.id, $body)
+            if (showTrailers) displayTrailers(movie, res.id, $body)
 
             if ($section) {
                 if (showBoxOffice) loadBoxOffice(res.id, $section.find('.filminfo-stats'))
