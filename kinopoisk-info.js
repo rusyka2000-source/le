@@ -16,9 +16,9 @@
 
     var manifest = {
         type: 'video',
-        version: '1.4.0',
-        name: 'Кинопоиск: сборы, награды и актёры',
-        description: 'Сборы, награды и информация об актёрах с Кинопоиска',
+        version: '1.5.0',
+        name: 'Кинопоиск: сборы, награды, актёры и трейлеры',
+        description: 'Сборы, награды, информация об актёрах и трейлеры с Кинопоиска',
         component: 'kinopoisk_info'
     }
 
@@ -81,7 +81,11 @@
             filminfo_actor_spouse: { ru: 'Супруг(а)', en: 'Spouse' },
             filminfo_actor_children: { ru: 'Дети', en: 'Children' },
             filminfo_actor_facts: { ru: 'Факты', en: 'Facts' },
-            filminfo_actor_filmography: { ru: 'Фильмография', en: 'Filmography' }
+            filminfo_actor_filmography: { ru: 'Фильмография', en: 'Filmography' },
+            filminfo_trailers: { ru: 'Трейлеры', en: 'Trailers' },
+            filminfo_trailer: { ru: 'Трейлер', en: 'Trailer' },
+            filminfo_no_trailers: { ru: 'Трейлеры не найдены', en: 'No trailers found' },
+            filminfo_set_trailers: { ru: 'Кнопка «Трейлеры»', en: 'Show "Trailers" button' }
         })
     }
 
@@ -138,6 +142,12 @@
             component: 'kinopoisk_info',
             param: { name: 'filminfo_actor_info', type: 'trigger', default: true },
             field: { name: Lampa.Lang.translate('filminfo_set_actor_info') }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'filminfo_trailers', type: 'trigger', default: true },
+            field: { name: Lampa.Lang.translate('filminfo_set_trailers') }
         })
 
         Lampa.SettingsApi.addParam({
@@ -233,7 +243,8 @@
             'body.light--version .filminfo-award{background:rgba(0,0,0,0.05)}' +
             'body.light--version .filminfo-award.focus{background:rgba(0,0,0,0.14)}' +
             'body.light--version .filminfo-actor__photo{background:rgba(0,0,0,0.08)}' +
-            'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}'
+            'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}' +
+            '.filminfo-trailers{display:flex;flex-wrap:wrap;gap:1em}'
 
         $('<style id="filminfo-style">').html(css).appendTo('head')
     }
@@ -510,6 +521,15 @@
         var url = kpUrl('/api/v1/staff/' + personId)
         kpGet(url, function (json) {
             callback(json || null)
+        }, function (kind) {
+            callback(null, kind)
+        })
+    }
+
+    function fetchVideos(kpId, callback) {
+        var url = kpUrl('/api/v2.2/films/' + kpId + '/videos')
+        kpGet(url, function (json) {
+            callback(json && json.items ? json.items : [])
         }, function (kind) {
             callback(null, kind)
         })
@@ -951,7 +971,7 @@
         })
     }
 
-    function showActorCard(person, $root) {
+    function showActorCard(person, $root, comp) {
         if ($root.find('.filminfo-section').length) return
 
         var $section = $(sectionHtml(actorBlockHtml(), T('filminfo_actor_section')))
@@ -970,7 +990,8 @@
             }
         }
 
-        registerSelectors($section)
+        var registered = registerActorRow(comp, $section)
+        if (!registered) registerSelectors($section)
         syncFull()
 
         var token = getToken()
@@ -984,7 +1005,7 @@
 
     function handlePersonPage(movie, e, $body) {
         if (!setting('filminfo_actor_info', true)) return
-        showActorCard(movie, $body)
+        showActorCard(movie, $body, e.link)
     }
 
     var actorCardTimer = null
@@ -998,9 +1019,19 @@
         }
     }
 
-    function tryActorCard() {
+    function tryActorCard(object) {
         if (actorCardDone) return
         actorCardDone = true
+
+        var comp = null
+        try {
+            var act = object || Lampa.Activity.active()
+            var a = act && act.activity
+            if (a) {
+                if (a.component) comp = a.component
+                else if (a.items) comp = a
+            }
+        } catch (e) {}
 
         var attempts = 0
         var MAX_ATTEMPTS = 50
@@ -1023,7 +1054,7 @@
                 return
             }
 
-            showActorCard({ name: name }, $act)
+            showActorCard({ name: name }, $act, comp)
         }
 
         actorCardTimer = setTimeout(poll, 400)
@@ -1076,6 +1107,27 @@
             } catch (e) {}
         }
         return -1
+    }
+
+    function findItemIndex(comp, selector) {
+        var items = comp && comp.items
+        if (!Array.isArray(items)) return -1
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i]
+            if (!it || typeof it.render != 'function') continue
+            try {
+                var el = it.render(true)
+                if (el && el.querySelector && el.querySelector(selector)) return i
+            } catch (e) {}
+        }
+        return -1
+    }
+
+    function registerActorRow(comp, $section) {
+        if (!comp) return false
+        var idx = findItemIndex(comp, '.person-start, .full-person__description, .full-descr')
+        if (idx < 0) return false
+        return registerFilminfoRow(comp, $section, idx)
     }
 
     function makeFilminfoRowItem($html, comp) {
@@ -1159,12 +1211,15 @@
         }
     }
 
-    function registerFilminfoRow(comp, $section) {
+    function registerFilminfoRow(comp, $section, index) {
         try {
-            if (!comp || !Array.isArray(comp.items) || !Array.isArray(comp.rows) || typeof comp.emit != 'function') return false
-            var descIndex = findDescriptionIndex(comp)
-            if (descIndex < 0) return false
-            var insertAt = descIndex + 1
+            if (!comp || !Array.isArray(comp.items) || typeof comp.emit != 'function') return false
+            if (typeof index != 'number' || index < 0) {
+                var descIndex = findDescriptionIndex(comp)
+                if (descIndex < 0) return false
+                index = descIndex
+            }
+            var insertAt = index + 1
             var item = makeFilminfoRowItem($section, comp)
             item.html.on('hover:focus', function (e) {
                 var el = e && e.target
@@ -1187,7 +1242,7 @@
                 }
             })
             comp.items.splice(insertAt, 0, item)
-            comp.rows.splice(insertAt, 0, 'filminfo')
+            if (Array.isArray(comp.rows)) comp.rows.splice(insertAt, 0, 'filminfo')
             bindFilminfoScrollFollow($section, comp)
             return true
         } catch (e) {
@@ -1344,6 +1399,96 @@
         next(2)
     }
 
+    function trailerIconSvg() {
+        return '<svg height="70" viewBox="0 0 80 70" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '<path fill-rule="evenodd" clip-rule="evenodd" d="M71.2555 2.08955C74.6975 3.2397 77.4083 6.62804 78.3283 10.9306C80 18.7291 80 35 80 35C80 35 80 51.2709 78.3283 59.0694C77.4083 63.372 74.6975 66.7603 71.2555 67.9104C65.0167 70 40 70 40 70C40 70 14.9833 70 8.74453 67.9104C5.3025 66.7603 2.59172 63.372 1.67172 59.0694C0 51.2709 0 35 0 35C0 35 0 18.7291 1.67172 10.9306C2.59172 6.62804 5.3025 3.2395 8.74453 2.08955C14.9833 0 40 0 40 0C40 0 65.0167 0 71.2555 2.08955ZM55.5909 35.0004L29.9773 49.5714V20.4286L55.5909 35.0004Z" fill="currentColor"></path>' +
+            '</svg>'
+    }
+
+    function addTrailersButton(movie, kpId, $body) {
+        try {
+            if (!$body || !$body.length || !kpId) return
+            var $cont = $body.find('.full-start-new__buttons, .full-start__buttons').first()
+            if (!$cont || !$cont.length) return
+            if ($cont.find('.filminfo-trailer-btn').length) return
+
+            var $btn = $('<div class="full-start__button selector filminfo-trailer-btn">' +
+                trailerIconSvg() +
+                '<span>' + esc(T('filminfo_trailers')) + '</span>' +
+                '</div>')
+
+            $btn.on('hover:enter', function () {
+                openKpTrailers(movie, kpId)
+            })
+
+            $cont.append($btn)
+
+            try {
+                if (Lampa.Controller && typeof Lampa.Controller.collectionAppend == 'function') Lampa.Controller.collectionAppend($btn)
+            } catch (e) {}
+        } catch (e) {}
+    }
+
+    function trailerVideoId(t) {
+        var id = String(t.videoId || '').trim()
+        if (id) return id
+        var m = String(t.url || '').match(/(?:youtube\.com\/(?:embed\/|watch\?v=)|youtu\.be\/)([^\/?#&]+)/i)
+        return m ? m[1] : ''
+    }
+
+    function playTrailer(t) {
+        var videoId = trailerVideoId(t)
+        if (!videoId) {
+            openExternal(String(t.url || ''))
+            return
+        }
+        var url = 'https://www.youtube.com/watch?v=' + videoId
+        var data = {
+            title: (t.name || '').trim() || T('filminfo_trailer'),
+            url: url
+        }
+        try {
+            if (typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') Lampa.Player.play(data)
+            else openExternal(url)
+        } catch (e) {
+            openExternal(url)
+        }
+    }
+
+    function showTrailersModal(movie, items, kind, controller) {
+        var $html = $('<div class="filminfo-modal filminfo-trailers"></div>')
+
+        if (!items || !items.length) {
+            var msg = kind == 'auth' ? T('filminfo_error_auth') : (kind == 'network' ? T('filminfo_error') : T('filminfo_no_trailers'))
+            $html.append('<div class="filminfo-message">' + esc(msg) + '</div>')
+        } else {
+            items.forEach(function (t) {
+                var name = (t.name || '').trim() || T('filminfo_trailer')
+                var $btn = $('<div class="filminfo-btn selector filminfo-trailer">' + esc(name) + '</div>')
+                $btn.on('hover:enter', function () {
+                    restoreController(controller)
+                    playTrailer(t)
+                })
+                $html.append($btn)
+            })
+        }
+
+        var params = modalBase(movie)
+        params.html = $html
+        params.buttons[0].onSelect = function () { restoreController(controller) }
+        params.onBack = function () { restoreController(controller) }
+        Lampa.Modal.open(params)
+    }
+
+    function openKpTrailers(movie, kpId) {
+        var controller = currentController()
+
+        fetchVideos(kpId, function (items, kind) {
+            if (!pageStillActive(movie)) return
+            showTrailersModal(movie, items, kind, controller)
+        })
+    }
+
     function onFull(e) {
         if (e.type == 'archive') {
             if (network) network.clear()
@@ -1369,7 +1514,8 @@
         var showBoxOffice = setting('filminfo_box_office', true)
         var showReviews = setting('filminfo_reviews', true)
         var showAwards = setting('filminfo_awards', true)
-        if (!showBoxOffice && !showReviews && !showAwards) return
+        var showTrailers = setting('filminfo_trailers', true)
+        if (!showBoxOffice && !showReviews && !showAwards && !showTrailers) return
 
         var $descr = $body.find('.full-descr').closest('.items-line')
         if (!$descr.length) $descr = $body.find('.items-line').eq(1)
@@ -1380,17 +1526,20 @@
         if (showAwards) bodyHtml += awardsBlockHtml()
         if (showReviews) bodyHtml += reviewsBlockHtml()
 
-        var $section = $(sectionHtml(bodyHtml))
-        $descr.after($section)
+        var $section = null
+        if (bodyHtml) {
+            $section = $(sectionHtml(bodyHtml))
+            $descr.after($section)
 
-        var registered = registerFilminfoRow(e.link, $section)
-        if (!registered) registerSelectors($section)
+            var registered = registerFilminfoRow(e.link, $section)
+            if (!registered) registerSelectors($section)
 
-        syncFull()
+            syncFull()
+        }
 
         var token = getToken()
         if (!token) {
-            $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(T('filminfo_no_token')))
+            if ($section) $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(T('filminfo_no_token')))
             return
         }
 
@@ -1400,15 +1549,19 @@
                 if (res && res.error == 'auth') msg = T('filminfo_error_auth')
                 else if (res && res.error == 'network') msg = T('filminfo_error')
                 else msg = T('filminfo_not_found_kp')
-                $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(msg))
+                if ($section) $section.find('.filminfo-stats, .filminfo-awards, .filminfo-reviews-list').html(msgHtml(msg))
                 return
             }
 
             try { Lampa.Storage.set('filminfo_last_kp_film', { id: res.id }) } catch (e2) {}
 
-            if (showBoxOffice) loadBoxOffice(res.id, $section.find('.filminfo-stats'))
-            if (showAwards) loadAwards(res.id, $section.find('.filminfo-awards'))
-            if (showReviews) loadReviewsPreview(movie, res.id, $section.find('.filminfo-reviews-list'))
+            if (showTrailers) addTrailersButton(movie, res.id, $body)
+
+            if ($section) {
+                if (showBoxOffice) loadBoxOffice(res.id, $section.find('.filminfo-stats'))
+                if (showAwards) loadAwards(res.id, $section.find('.filminfo-awards'))
+                if (showReviews) loadReviewsPreview(movie, res.id, $section.find('.filminfo-reviews-list'))
+            }
 
             if (setting('filminfo_actor_info', true)) {
                 fetchStaff(res.id, function (staff) {
@@ -1424,7 +1577,7 @@
         }
         if (e.type == 'start' && e.component == 'actor' && setting('filminfo_actor_info', true)) {
             resetActorCard()
-            tryActorCard()
+            tryActorCard(e.object)
         }
     }
 
