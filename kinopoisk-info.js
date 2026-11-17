@@ -191,6 +191,7 @@
             '.filminfo-award__result--win{color:#4caf50;border:1px solid rgba(76,175,80,0.5)}' +
             '.filminfo-award__result--nom{color:#ffc107;border:1px solid rgba(255,193,7,0.5)}' +
             '.filminfo-award__cat{opacity:0.75;font-size:0.95em;flex-basis:100%}' +
+            '.filminfo-award.focus{background:rgba(255,255,255,0.14);outline:0.2em solid #fff;outline-offset:-0.2em}' +
             '.filminfo-actor{display:flex;gap:1.5em;flex-wrap:wrap}' +
             '.filminfo-actor.focus{background:rgba(255,255,255,0.05);border-radius:0.8em;outline:0.2em solid #fff;outline-offset:-0.2em}' +
             '.filminfo-actor__photo{flex:0 0 13em;width:13em;height:18em;border-radius:0.8em;overflow:hidden;background:rgba(0,0,0,0.25)}' +
@@ -207,6 +208,7 @@
             '.filminfo-filmography__item{display:flex;gap:1em;opacity:0.9}' +
             '.filminfo-filmography__year{opacity:0.6;min-width:3em}' +
             'body.light--version .filminfo-award{background:rgba(0,0,0,0.05)}' +
+            'body.light--version .filminfo-award.focus{background:rgba(0,0,0,0.14)}' +
             'body.light--version .filminfo-actor__photo{background:rgba(0,0,0,0.08)}' +
             'body.light--version .filminfo-actor__fact{background:rgba(0,0,0,0.05)}'
 
@@ -744,7 +746,7 @@
         var label = win ? T('filminfo_awards_win') : T('filminfo_awards_nom')
         var cls = win ? 'filminfo-award__result--win' : 'filminfo-award__result--nom'
         var cat = (a.nominationItem && a.nominationItem.name) || a.nominationName || ''
-        var html = '<div class="filminfo-award">'
+        var html = '<div class="filminfo-award selector">'
         html += '<div class="filminfo-award__year">' + (a.year ? esc(a.year) : '') + '</div>'
         html += '<div class="filminfo-award__name">' + esc(a.name || '—') + '</div>'
         html += '<span class="filminfo-award__result ' + cls + '">' + esc(label) + '</span>'
@@ -777,6 +779,12 @@
                 html += awardItemHtml(a)
             })
             $box.html(html)
+            $box.find('.filminfo-award').on('hover:enter', function () {
+                openExternal('https://www.kinopoisk.ru/film/' + kpId + '/awards/')
+            })
+            registerSelectors($box)
+            refreshFilminfoRow($box.closest('.filminfo-section'))
+
             syncFull()
         })
     }
