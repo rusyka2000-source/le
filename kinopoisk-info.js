@@ -1413,6 +1413,62 @@
         return m ? m[1] : ''
     }
 
+    function trailerWidgetId(t) {
+        var m = String(t.url || '').match(/kinopoisk\.ru\/discovery\/trailer\/(\d+)/i)
+        return m ? m[1] : ''
+    }
+
+    function parseTrailerWidget(html) {
+        try {
+            var m = String(html).match(/<script[^>]*data-state[^>]*>([\s\S]*?)<\/script>/i)
+            if (!m) return null
+            var json = JSON.parse(decodeURIComponent(m[1]))
+            var trailers = json && json.models && json.models.trailers
+            if (!trailers) return null
+            var keys = Object.keys(trailers)
+            if (!keys.length) return null
+            var t = trailers[keys[0]]
+            if (!t || !t.streamUrl) return null
+            var preview = ''
+            if (t.img && t.img.mediumPreviewUrl && t.img.mediumPreviewUrl.x1) preview = 'https:' + t.img.mediumPreviewUrl.x1
+            else if (t.img && t.img.previewUrl && t.img.previewUrl.x1) preview = 'https:' + t.img.previewUrl.x1
+            return { streamUrl: t.streamUrl, preview: preview }
+        } catch (e) {
+            return null
+        }
+    }
+
+    function fetchTrailerWidget(trailerId, callback) {
+        var url = 'https://widgets.kinopoisk.ru/discovery/trailer/' + trailerId + '?onlyPlayer=1&autoplay=0'
+        var done = function (html) {
+            callback(parseTrailerWidget(html))
+        }
+        var fail = function () {
+            callback(null)
+        }
+        try {
+            if (network && typeof network.native == 'function') network.native(url, done, fail, false, { dataType: 'html', timeout: 1000 * 20 })
+            else if (network) network.silent(url, done, fail, false, { dataType: 'html', timeout: 1000 * 20 })
+            else callback(null)
+        } catch (e) {
+            callback(null)
+        }
+    }
+
+    function playTrailerItem(a) {
+        if (!a || !a.url) return
+        var u = String(a.url)
+        try {
+            if (u.indexOf('youtube.com') >= 0 || u.indexOf('strm.yandex') >= 0 || /\.m3u8(\?|$)/i.test(u)) {
+                if (typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') {
+                    Lampa.Player.play({ title: a.title || T('filminfo_trailer'), url: u })
+                    return
+                }
+            }
+        } catch (e) {}
+        openExternal(u)
+    }
+
     function displayTrailers(movie, kpId, $body) {
         try {
             if (!kpId) return
@@ -1423,17 +1479,43 @@
                 if (!$cont || !$cont.length) return
                 if ($cont.find('.button--kinopoisk_trailers, .filminfo-trailer-btn').length) return
 
-                var kinopoisk_trailers = items.map(function (t) {
+                var list = []
+                items.forEach(function (t) {
+                    var name = (t.name || '').trim() || T('filminfo_trailer')
                     var videoId = trailerVideoId(t)
-                    if (!videoId) return null
-                    return {
-                        title: (t.name || '').trim() || T('filminfo_trailer'),
-                        url: 'https://www.youtube.com/watch?v=' + videoId,
-                        icon: '<img class="size-youtube" src="https://img.youtube.com/vi/' + videoId + '/default.jpg">'
+                    if (videoId) {
+                        list.push({
+                            title: name,
+                            url: 'https://www.youtube.com/watch?v=' + videoId,
+                            icon: '<img class="size-youtube" src="https://img.youtube.com/vi/' + videoId + '/default.jpg">',
+                            ready: true
+                        })
+                    } else {
+                        var wid = trailerWidgetId(t)
+                        if (wid) {
+                            list.push({
+                                title: name,
+                                url: String(t.url || ''),
+                                wid: wid,
+                                icon: '<img class="size-youtube" src="https://st.kp.yandex.net/images/film_iphone/iphone360_' + kpId + '.jpg">',
+                                ready: false
+                            })
+                        }
                     }
-                }).filter(function (a) { return a })
+                })
 
-                if (!kinopoisk_trailers.length) return
+                if (!list.length) return
+
+                list.forEach(function (a) {
+                    if (a.ready || !a.wid) return
+                    fetchTrailerWidget(a.wid, function (res) {
+                        if (res) {
+                            a.ready = true
+                            a.url = res.streamUrl
+                            if (res.preview) a.icon = '<img class="size-youtube" src="' + res.preview + '">'
+                        }
+                    })
+                })
 
                 $cont.append('<div class="full-start__button selector filminfo-trailer-btn">' +
                     trailerBtnIcon() +
@@ -1443,11 +1525,11 @@
                 var $btn = $cont.find('.filminfo-trailer-btn').last()
 
                 $btn.on('hover:enter', function () {
-                    var trailers = kinopoisk_trailers.map(function (a) {
+                    var trailers = list.map(function (a) {
                         return {
                             title: a.title,
                             url: a.url,
-                            icon: a.icon,
+                            icon: a.icon || '',
                             template: 'selectbox_icon'
                         }
                     })
@@ -1458,14 +1540,14 @@
                                 title: 'Трейлеры Кинопоиск',
                                 items: trailers,
                                 onSelect: function (a) {
-                                    if (a && a.url && typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') Lampa.Player.play(a)
+                                    playTrailerItem(a)
                                 },
                                 onBack: function () {
                                     try { Lampa.Controller.toggle('full_start') } catch (e2) {}
                                 }
                             })
-                        } else if (trailers.length && typeof Lampa.Player != 'undefined' && typeof Lampa.Player.play == 'function') {
-                            Lampa.Player.play(trailers[0])
+                        } else if (trailers.length) {
+                            playTrailerItem(trailers[0])
                         }
                     } catch (e) {}
                 })
