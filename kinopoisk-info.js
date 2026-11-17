@@ -16,7 +16,7 @@
 
     var manifest = {
         type: 'video',
-        version: '1.3.0',
+        version: '1.4.0',
         name: 'Кинопоиск: сборы, награды и актёры',
         description: 'Сборы, награды и информация об актёрах с Кинопоиска',
         component: 'kinopoisk_info'
@@ -206,7 +206,8 @@
             'body.light--version .filminfo-btn.focus{background:#000;color:#fff}' +
             'body.light--version .filminfo-all-review{border-bottom-color:rgba(0,0,0,0.1)}' +
             'body.light--version .filminfo-all-review__head.focus{background:rgba(0,0,0,0.08)}' +
-            '.filminfo-award{display:flex;flex-wrap:wrap;align-items:center;gap:0.5em 1.2em;padding:0.8em 1.1em;background:rgba(0,0,0,0.25);border-radius:0.7em}' +
+            '.filminfo-awards{display:flex;flex-wrap:wrap;gap:1em}' +
+            '.filminfo-award{display:flex;flex-wrap:wrap;align-items:center;gap:0.5em 1.2em;flex:1 1 16em;min-width:15em;max-width:32em;width:auto;padding:0.8em 1.1em;background:rgba(0,0,0,0.25);border-radius:0.7em}' +
             '.filminfo-award__year{font-weight:600;opacity:0.8;min-width:3.5em}' +
             '.filminfo-award__name{font-weight:500;flex:1 1 14em}' +
             '.filminfo-award__result{font-size:0.95em;padding:0.15em 0.7em;border-radius:1em}' +
@@ -831,6 +832,9 @@
             }
 
             items.sort(function (a, b) {
+                var wa = a.win ? 0 : 1
+                var wb = b.win ? 0 : 1
+                if (wa != wb) return wa - wb
                 return (a.year || 0) - (b.year || 0)
             })
 
@@ -1093,11 +1097,35 @@
                     comp.active = comp.items.indexOf(self)
                     comp.scroll.update(self.render(true))
                 } catch (e) {}
+                self._fromAbove = true
+                try {
+                    var prev = Navigator.getFocusedElement()
+                    if (prev && prev.nodeType) {
+                        var sr = self.html[0].getBoundingClientRect()
+                        var pr = prev.getBoundingClientRect()
+                        if (pr.bottom > sr.top + 2) self._fromAbove = false
+                    }
+                } catch (e) {}
                 Lampa.Controller.add('filminfo_row', {
                     link: self,
                     toggle: function () {
+                        var target = null
+                        try {
+                            var focused = Navigator.getFocusedElement()
+                            if (focused && focused.nodeType && self.html[0].contains(focused) && focused.offsetParent !== null) target = focused
+                        } catch (e) {}
+                        if (!target) target = self.last
+                        if (!target) {
+                            var sels = []
+                            try {
+                                self.html.find('.selector').each(function () {
+                                    if (this.offsetParent !== null) sels.push(this)
+                                })
+                            } catch (e) {}
+                            if (sels.length) target = self._fromAbove ? sels[0] : sels[sels.length - 1]
+                        }
                         Lampa.Controller.collectionSet(self.html)
-                        Lampa.Controller.collectionFocus(self.last, self.html)
+                        Lampa.Controller.collectionFocus(target, self.html)
                     },
                     right: function () {
                         Navigator.move('right')
@@ -1138,6 +1166,12 @@
             if (descIndex < 0) return false
             var insertAt = descIndex + 1
             var item = makeFilminfoRowItem($section, comp)
+            item.html.on('hover:focus', function (e) {
+                var el = e && e.target
+                if (el && el.nodeType && el.classList && el.classList.contains('selector') && $section[0].contains(el)) {
+                    item.last = el
+                }
+            })
             item.use({
                 onDown: comp.emit.bind(comp, 'down'),
                 onUp: comp.emit.bind(comp, 'up'),
@@ -1176,7 +1210,14 @@
                     var rect = el.getBoundingClientRect()
                     if (!rect.width && !rect.height) return
                     if (rect.bottom > sr.bottom || rect.top < sr.top) {
-                        sc.update(el, false)
+                        var delta = rect.top < sr.top ? sr.top - rect.top : rect.bottom - sr.bottom
+                        if (delta > 0) {
+                            if (typeof sc.shift == 'function') {
+                                sc.shift(rect.top < sr.top ? -delta : delta)
+                            } else {
+                                sc.update(el, rect.top < sr.top ? false : true)
+                            }
+                        }
                     }
                 } catch (e) {}
             })
