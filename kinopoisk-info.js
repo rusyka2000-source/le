@@ -16,7 +16,7 @@
 
     var manifest = {
         type: 'video',
-        version: '1.2.0',
+        version: '1.3.0',
         name: 'Кинопоиск: сборы, награды и актёры',
         description: 'Сборы, награды и информация об актёрах с Кинопоиска',
         component: 'kinopoisk_info'
@@ -38,6 +38,11 @@
             filminfo_loading: { ru: 'Загрузка…', en: 'Loading…' },
             filminfo_no_data: { ru: 'Нет данных', en: 'No data' },
             filminfo_no_reviews: { ru: 'Комментариев пока нет', en: 'No comments yet' },
+            filminfo_no_matching: { ru: 'Нет подходящих отзывов', en: 'No matching reviews' },
+            filminfo_set_review_filter: { ru: 'Показывать отзывы', en: 'Show reviews' },
+            filminfo_filter_all: { ru: 'Все', en: 'All' },
+            filminfo_filter_positive: { ru: 'Только положительные', en: 'Positive only' },
+            filminfo_filter_negative: { ru: 'Только отрицательные', en: 'Negative only' },
             filminfo_not_found_kp: { ru: 'Фильм не найден на Кинопоиске', en: 'Movie not found on Kinopoisk' },
             filminfo_error: { ru: 'Не удалось загрузить данные Кинопоиска', en: 'Failed to load Kinopoisk data' },
             filminfo_error_auth: { ru: 'Неверный токен API Кинопоиска', en: 'Invalid Kinopoisk API token' },
@@ -110,6 +115,21 @@
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
+            param: {
+                name: 'filminfo_review_filter',
+                type: 'select',
+                values: {
+                    all: Lampa.Lang.translate('filminfo_filter_all'),
+                    positive: Lampa.Lang.translate('filminfo_filter_positive'),
+                    negative: Lampa.Lang.translate('filminfo_filter_negative')
+                },
+                default: 'all'
+            },
+            field: { name: Lampa.Lang.translate('filminfo_set_review_filter') }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
             param: { name: 'filminfo_awards', type: 'trigger', default: true },
             field: { name: Lampa.Lang.translate('filminfo_set_awards') }
         })
@@ -141,8 +161,8 @@
             '.filminfo-stat{flex:1 1 14em;margin:0.5em;padding:1em 1.2em;background:rgba(0,0,0,0.25);border-radius:0.8em}' +
             '.filminfo-stat__name{font-size:1em;opacity:0.7;margin-bottom:0.4em}' +
             '.filminfo-stat__value{font-size:1.6em;font-weight:600}' +
-            '.filminfo-reviews-list{display:flex;flex-direction:column;gap:1em}' +
-            '.filminfo-review{width:100%}' +
+            '.filminfo-reviews-list{display:flex;flex-wrap:wrap;gap:1em}' +
+            '.filminfo-review{flex:1 1 16em;min-width:15em;max-width:32em;width:auto}' +
             '.filminfo-review__badge{font-size:1.1em;font-weight:600;margin-bottom:0.6em}' +
             '.filminfo-review__title{font-size:1.25em;font-weight:500;margin-bottom:0.5em}' +
             '.filminfo-review__text{-webkit-line-clamp:4;line-clamp:4}' +
@@ -151,11 +171,11 @@
             '.filminfo-review__likes{margin-left:2em;display:flex;gap:0.6em}' +
             '.filminfo-likes--pos{color:#4caf50}' +
             '.filminfo-likes--neg{color:#f44336}' +
-            '.filminfo-summary{display:flex;flex-wrap:wrap;align-items:center;gap:0.5em 1.5em;font-size:1.15em;margin-bottom:0.5em}' +
+            '.filminfo-summary{display:flex;flex-wrap:wrap;align-items:center;gap:0.5em 1.5em;font-size:1.15em;margin-bottom:0.5em;flex-basis:100%}' +
             '.filminfo-summary__total{font-weight:600}' +
             '.filminfo-summary__item{display:inline-flex;align-items:center;gap:0.5em;opacity:0.85}' +
             '.filminfo-dot{width:0.7em;height:0.7em;border-radius:100%;display:inline-block}' +
-            '.filminfo-btn{display:inline-block;align-self:flex-start;margin-top:0.5em;padding:0.6em 1.4em;font-size:1.2em;background:rgba(0,0,0,0.25);border-radius:2em;cursor:pointer}' +
+            '.filminfo-btn{display:inline-block;align-self:flex-start;flex-basis:100%;margin-top:0.5em;padding:0.6em 1.4em;font-size:1.2em;background:rgba(0,0,0,0.25);border-radius:2em;cursor:pointer}' +
             '.filminfo-btn.focus{background:#fff;color:#000}' +
             '.filminfo-message{opacity:0.7;font-size:1.2em}' +
             '.filminfo-loading{opacity:0.5}' +
@@ -701,26 +721,30 @@
         })
     }
 
+    function reviewMatches(r, filter) {
+        if (!r) return false
+        if (filter == 'positive') return r.type == 'POSITIVE'
+        if (filter == 'negative') return r.type == 'NEGATIVE'
+        return true
+    }
+
     function loadReviewsPreview(movie, kpId, $list) {
         $list.html(loadingHtml())
 
-        fetchReviews(kpId, 1, function (json, kind) {
-            if (!json) {
-                $list.html(msgHtml(kind == 'auth' ? T('filminfo_error_auth') : T('filminfo_error')))
-                syncFull()
-                return
-            }
+        var filter = setting('filminfo_review_filter', 'all')
+        var collected = []
+        var firstJson = null
 
-            var items = json.items || []
+        function render(items, json) {
             if (!items.length) {
-                $list.html(msgHtml(T('filminfo_no_reviews')))
+                $list.html(msgHtml(filter == 'all' ? T('filminfo_no_reviews') : T('filminfo_no_matching')))
                 syncFull()
                 return
             }
 
             $list.html(summaryHtml(json))
 
-            items.slice(0, PREVIEW_COUNT).forEach(function (r) {
+            items.forEach(function (r) {
                 var $card = $(reviewCardHtml(r))
                 $card.on('hover:enter', function () {
                     openReviewModal(movie, r)
@@ -728,7 +752,10 @@
                 $list.append($card)
             })
 
-            var total = json.total || items.length
+            var total
+            if (filter == 'all') total = json.total || collected.length
+            else total = collected.filter(function (r) { return reviewMatches(r, filter) }).length
+
             var $btn = $('<div class="filminfo-btn selector">' + esc(T('filminfo_all_comments') + ' (' + total + ')') + '</div>')
             $btn.on('hover:enter', function () {
                 openAllReviewsModal(movie, kpId, json)
@@ -738,7 +765,36 @@
             refreshFilminfoRow($list.closest('.filminfo-section'))
 
             syncFull()
-        })
+        }
+
+        function collect(page) {
+            fetchReviews(kpId, page, function (json, kind) {
+                if (!json) {
+                    var got = collected.filter(function (r) { return reviewMatches(r, filter) })
+                    if (got.length) {
+                        render(got.slice(0, PREVIEW_COUNT), firstJson)
+                    } else {
+                        $list.html(msgHtml(kind == 'auth' ? T('filminfo_error_auth') : T('filminfo_error')))
+                        syncFull()
+                    }
+                    return
+                }
+
+                if (!firstJson) firstJson = json
+                if (json.items) collected = collected.concat(json.items)
+
+                var got = collected.filter(function (r) { return reviewMatches(r, filter) })
+                var totalPages = json.totalPages || page
+                if (got.length < PREVIEW_COUNT && page < Math.min(totalPages, MAX_ALL_PAGES)) {
+                    collect(page + 1)
+                    return
+                }
+
+                render(got.slice(0, PREVIEW_COUNT), firstJson)
+            })
+        }
+
+        collect(1)
     }
 
     function awardItemHtml(a) {
@@ -1223,10 +1279,11 @@
     }
 
     function openAllReviewsModal(movie, kpId, firstPage) {
+        var filter = setting('filminfo_review_filter', 'all')
         var totalPages = firstPage.totalPages || 1
         var pagesToLoad = Math.min(totalPages, MAX_ALL_PAGES)
-        var collected = (firstPage.items || []).slice()
-        var total = firstPage.total || collected.length
+        var collected = (firstPage.items || []).filter(function (r) { return reviewMatches(r, filter) })
+        var total = filter == 'all' ? (firstPage.total || collected.length) : collected.length
 
         function next(page) {
             if (page > pagesToLoad) {
@@ -1234,7 +1291,7 @@
                 return
             }
             fetchReviews(kpId, page, function (json) {
-                if (json && json.items) collected = collected.concat(json.items)
+                if (json && json.items) collected = collected.concat(json.items.filter(function (r) { return reviewMatches(r, filter) }))
                 next(page + 1)
             })
         }
