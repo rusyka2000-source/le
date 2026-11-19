@@ -2438,9 +2438,8 @@
 
         Parser.get = function (type, callback, params) {
             return orig.call(this, type, function (data) {
-                if (data && data.Results && Array.isArray(data.Results)) {
+if (data && data.Results && Array.isArray(data.Results)) {
                     etProcessResults(data, type)
-                    etInjectResumeButton(type || data)
                     var arr = data.Results
 
                     var reorder = function (list) {
@@ -2513,349 +2512,1282 @@
         }
     }
 
-    /* ------- Продолжить просмотр (resume) ------- */
+/* ------- Продолжить просмотр (resume) ------- */
 
-    var etPlayCtx = null
-    var etHeartbeat = null
+    var ET_SYNC_KEY = 'et_resume_history_v1'
+    var ET_CACHE_KEY = 'et_resume_history_cache_v1'
+    var ET_SCHEMA_VERSION = 1
+    var ET_WRITE_INTERVAL_MS = 15000
+    var ET_TORRSERVER_WRITE_INTERVAL_MS = 30000
+    var ET_SEEN_PERCENT = 90
+    var ET_REQUEST_TIMEOUT_MS = 5000
+    var ET_VIDEO_EXTENSIONS = ['asf', 'wmv', 'divx', 'avi', 'mp4', 'm4v', 'mov', '3gp', '3g2', 'mkv', 'trp', 'tp', 'mts', 'mpg', 'mpeg', 'dat', 'vob', 'rm', 'rmvb', 'm2ts', 'ts']
+    var ET_SUBTITLE_EXTENSIONS = ['srt', 'vtt', 'ass', 'ssa']
+    var etResumeRuntime = null
 
-    function etResumeKey(movieId) { return 'et_resume_' + movieId }
-
-    function etLoadResume(movieId) {
-        if (!movieId) return null
-        try { return Lampa.Storage.get(etResumeKey(movieId), null) } catch (e) { return null }
+    function etText(value) {
+        return typeof value === 'string' ? value.trim() : ''
     }
 
-    function etSaveResume(movieId, rec) {
-        if (!movieId || !rec) return
-        try { Lampa.Storage.set(etResumeKey(movieId), rec) } catch (e) {}
+    function etNumber(value) {
+        return Number.isFinite(Number(value)) ? Number(value) : 0
     }
 
-    function etClearResume(movieId) {
-        if (!movieId) return
-        try { Lampa.Storage.remove(etResumeKey(movieId)) } catch (e) {
-            try { Lampa.Storage.set(etResumeKey(movieId), null) } catch (e2) {}
-        }
+    function etValidAlias(value) {
+        return /^(?:movie:)?(?:source:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+|tmdb:\d+|imdb:tt\d+|kinopoisk:\d+)$/.test(value)
     }
 
-    function etPlayerInstance() {
-        try {
-            if (Lampa.Player && Lampa.Player.player) return Lampa.Player.player
-        } catch (e) {}
-        return null
-    }
-
-    function etPlayerPosition() {
-        var p = etPlayerInstance()
-        if (!p) return null
-        try {
-            if (typeof p.time == 'function') {
-                var t = p.time()
-                if (typeof t == 'number') return t
-            }
-            if (typeof p.getPosition == 'function') return p.getPosition()
-            if (typeof p.currentTime == 'function') return p.currentTime()
-            var v = p.video || p.element
-            if (v) {
-                if (typeof v.currentTime == 'number') return v.currentTime
-                if (typeof v.getCurrentTime == 'function') return v.getCurrentTime()
-            }
-        } catch (e) {}
-        return null
-    }
-
-    function etPlayerDuration() {
-        var p = etPlayerInstance()
-        if (!p) return null
-        try {
-            if (typeof p.duration == 'function') {
-                var d = p.duration()
-                if (typeof d == 'number') return d
-            }
-            if (typeof p.getDuration == 'function') return p.getDuration()
-            var v = p.video || p.element
-            if (v && typeof v.duration == 'number') return v.duration
-        } catch (e) {}
-        return null
-    }
-
-    function etSeekTo(seconds) {
-        var p = etPlayerInstance()
-        if (!p) return false
-        try {
-            if (typeof p.setPosition == 'function') { p.setPosition(seconds); return true }
-            if (typeof p.seek == 'function') { p.seek(seconds); return true }
-        } catch (e) {}
-        try {
-            var v = p.video || p.element
-            if (v && typeof v.currentTime == 'number') { v.currentTime = seconds; return true }
-        } catch (e) {}
-        return false
-    }
-
-    function etResumeSeek(position) {
-        var tries = 0
-        var maxTries = 90
-        function tick() {
-            if (tries++ > maxTries) return
-            var pos = etPlayerPosition()
-            var dur = etPlayerDuration()
-            if (dur != null && dur > 0 && pos != null && pos >= position - 3) return
-            if (dur != null && dur > 0) etSeekTo(position)
-            setTimeout(tick, 1500)
-        }
-        setTimeout(tick, 2000)
-    }
-
-    function etFormatTime(sec) {
-        var s = Math.max(0, Math.floor(sec || 0))
-        var h = Math.floor(s / 3600)
-        var m = Math.floor((s % 3600) / 60)
-        var ss = s % 60
-        var mm = m < 10 ? '0' + m : String(m)
-        var sm = ss < 10 ? '0' + ss : String(ss)
-        if (h > 0) return h + ':' + mm + ':' + sm
-        return mm + ':' + sm
-    }
-
-    function etStartParams(e) {
-        var p = null
-        try { p = e && e.data } catch (err) {}
-        if (!p || typeof p != 'object') {
-            try { p = Lampa.Player && Lampa.Player.current } catch (err) {}
-        }
-        if (!p || typeof p != 'object') p = {}
-        return {
-            url: String(p.url || p.torrent || p.stream || ''),
-            title: String(p.title || p.Title || p.name || '')
-        }
-    }
-
-    function etSaveCurrentPosition() {
-        if (!etPlayCtx || !etPlayCtx.movieId || !etPlayCtx.url) return
-        var pos = etPlayerPosition()
-        if (pos == null || pos < 15) return
-        var dur = etPlayerDuration()
-        etSaveResume(etPlayCtx.movieId, {
-            title: etPlayCtx.title || '',
-            url: etPlayCtx.url,
-            position: pos,
-            duration: dur,
-            updated: Date.now()
+    function etCanonicalAlias(aliases) {
+        return aliases.find(function (value) {
+            return /^(?:movie:)?tmdb:/.test(value)
+        }) || aliases.find(function (value) {
+            return /^(?:movie:)?source:/.test(value)
+        }) || aliases.find(function (value) {
+            return /^(?:movie:)?imdb:/.test(value)
+        }) || aliases.find(function (value) {
+            return /^(?:movie:)?kinopoisk:/.test(value)
         })
     }
 
-    function etStartHeartbeat() {
-        if (!etHeartbeat) etHeartbeat = setInterval(function () { etSaveCurrentPosition() }, 10000)
-    }
-
-    function etStopHeartbeat() {
-        if (etHeartbeat) {
-            clearInterval(etHeartbeat)
-            etHeartbeat = null
-        }
-    }
-
-    function etResumeOnStart(e) {
-        var wasResume = etPlayCtx && etPlayCtx.resume
-        var sp = etStartParams(e)
-        var movieId = null
-        try {
-            var act = Lampa.Activity.active()
-            if (act && act.card && act.card.id) movieId = act.card.id
-        } catch (err) {}
-        if (!movieId && etPlayCtx) movieId = etPlayCtx.movieId
-        etPlayCtx = {
-            movieId: movieId,
-            url: sp.url || (etPlayCtx && etPlayCtx.url),
-            title: sp.title || (etPlayCtx && etPlayCtx.title),
-            resume: wasResume
-        }
-        etStartHeartbeat()
-        if (!wasResume && movieId && etPlayCtx.url) {
-            var rec = etLoadResume(movieId)
-            if (rec && rec.url === etPlayCtx.url && rec.position > 20) {
-                etResumeSeek(rec.position)
+    function etCardIdentity(card) {
+        card = card || {}
+        var source = etText(card.source) || 'tmdb'
+        var id = card.id
+        var tmdb = card.tmdb_id || (source === 'tmdb' ? id : 0)
+        var imdb = etText(card.imdb_id)
+        var kinopoisk = card.kinopoisk_id || 0
+        var media = etText(card.media_type) || etText(card.type)
+        var movie = media === 'movie' || (media !== 'tv' && !card.name && !card.first_air_date && etNumber(card.number_of_seasons) <= 0 && Boolean(etText(card.release_date)))
+        var prefix = movie ? 'movie:' : ''
+        var aliases = []
+        if (id !== undefined && id !== null) aliases.push(prefix + 'source:' + source + ':' + id)
+        if (tmdb) aliases.push(prefix + 'tmdb:' + tmdb)
+        if (imdb) aliases.push(prefix + 'imdb:' + imdb)
+        if (kinopoisk) aliases.push(prefix + 'kinopoisk:' + kinopoisk)
+        return {
+            key: aliases.find(function (value) {
+                return /^(?:movie:)?tmdb:/.test(value)
+            }) || aliases[0] || '',
+            aliases: Array.from(new Set(aliases)),
+            card: {
+                source: source,
+                id: id,
+                tmdb: tmdb || 0,
+                imdb: imdb,
+                kinopoisk: kinopoisk || 0
             }
         }
     }
 
-    function etHandleEnded() {
-        etStopHeartbeat()
-        if (!etPlayCtx || !etPlayCtx.movieId) {
-            etPlayCtx = null
-            return
-        }
-        var pos = etPlayerPosition()
-        var dur = etPlayerDuration()
-        var finished = dur != null && dur > 0 && pos != null && pos >= dur - 120
-        if (finished) etClearResume(etPlayCtx.movieId)
-        else etSaveCurrentPosition()
-        etPlayCtx = null
+    function etSanitizeProgress(input) {
+        input = input || {}
+        var duration = Math.max(0, etNumber(input.duration))
+        var time = Math.max(0, etNumber(input.time))
+        var calculated = duration ? time / duration * 100 : 0
+        var percent = Math.max(0, Math.min(100, etNumber(input.percent) || calculated))
+        return { time: time, duration: duration, percent: percent }
     }
 
-    function etOnPlayer(e) {
-        try {
-            if (e.type == 'start') { etResumeOnStart(e); return }
-            if (e.type == 'ended') { etHandleEnded(); return }
-            if (e.type == 'stop' || e.type == 'destroy') {
-                etSaveCurrentPosition()
-                etStopHeartbeat()
-                etPlayCtx = null
-                return
+    function etEmptyHistory() {
+        return { schema: ET_SCHEMA_VERSION, cards: {} }
+    }
+
+    function etSanitizeModeRecord(input) {
+        input = input || {}
+        var mode = input.mode === 'torrent' ? 'torrent' : ''
+        if (!mode) return null
+        var episode = input.episode || {}
+        var base = {
+            mode: mode,
+            updated_at: Math.max(0, etNumber(input.updated_at)),
+            episode: {
+                season: Math.max(0, etNumber(episode.season)),
+                episode: Math.max(0, etNumber(episode.episode)),
+                timeline_hash: etText(episode.timeline_hash)
+            },
+            progress: etSanitizeProgress(input.progress),
+            playlist: {
+                kind: 'season',
+                selected_season: Math.max(0, etNumber(episode.season)),
+                selected_episode: Math.max(0, etNumber(episode.episode))
             }
-            if (e.type == 'pause') etSaveCurrentPosition()
-        } catch (err) {}
-    }
-
-    function etResumePlay(movie) {
-        var rec = etLoadResume(movie && movie.id)
-        if (!rec || !rec.url) {
-            try { Lampa.Noty.show('Нет данных о просмотре') } catch (e) {}
-            return
         }
-        var title = rec.title || (movie && (movie.title || movie.name)) || ''
-        etPlayCtx = { movieId: movie && movie.id, url: rec.url, title: title, resume: true }
-        etStartHeartbeat()
-        try {
-            if (Lampa.Torrent && typeof Lampa.Torrent.start == 'function') {
-                Lampa.Torrent.start({ url: rec.url, MagnetUri: rec.url, Link: rec.url, Title: title }, movie || {})
-            } else {
-                Lampa.Player.play({ title: title, url: rec.url })
-            }
-        } catch (e) {}
-        etResumeSeek(rec.position)
+        var source = input.torrent || {}
+        base.torrent = {
+            infohash: etText(source.infohash).toUpperCase(),
+            magnet: etText(source.magnet).indexOf('magnet:') === 0 ? etText(source.magnet) : '',
+            file_index: Math.max(0, etNumber(source.file_index)),
+            file_path: etText(source.file_path),
+            torrent_title: etText(source.torrent_title)
+        }
+        if (!base.torrent.infohash || !base.torrent.file_path) return null
+        return base
     }
 
-    function etCapturePlayed(element, movie) {
-        try {
-            var url = element && (element.MagnetUri || element.Link || element.url || '')
-            var title = element && (element.Title || element.title || '')
-            var movieId = movie && (movie.id || movie.kinopoisk_id)
-            if (!movieId) {
+    function etModesOf(entry) {
+        return entry && entry.modes ? entry.modes : {}
+    }
+
+    function etNewestMode(modes) {
+        return Object.values(modes).sort(function (left, right) {
+            return right.updated_at - left.updated_at
+        })[0]
+    }
+
+    function etSanitizeHistory(input) {
+        var root = etEmptyHistory()
+        if (!input || Number(input.schema) !== ET_SCHEMA_VERSION || !input.cards) return root
+        Object.keys(input.cards).forEach(function (key) {
+            var source = input.cards[key] || {}
+            var modes = {}
+            var clean = etSanitizeModeRecord(source.modes && source.modes.torrent)
+            if (clean) modes.torrent = clean
+            if (Object.keys(modes).length) {
+                var newest = etNewestMode(modes)
+                var aliases = Array.from(new Set((source.aliases || []).filter(function (value) {
+                    return typeof value === 'string'
+                }).map(function (value) {
+                    return value.trim()
+                }).filter(etValidAlias)))
+                var safeKey = etCanonicalAlias(aliases)
+                if (!safeKey) return
+                root.cards[safeKey] = {
+                    aliases: aliases,
+                    last_mode: newest.mode,
+                    modes: modes
+                }
+            }
+        })
+        return root
+    }
+
+    function etMergeHistory(leftInput, rightInput) {
+        var left = etSanitizeHistory(leftInput)
+        var right = etSanitizeHistory(rightInput)
+        var result = etEmptyHistory()
+        var incoming = Object.entries(left.cards).concat(Object.entries(right.cards))
+        incoming.forEach(function (pair) {
+            var sourceKey = pair[0]
+            var source = pair[1]
+            var aliases = Array.from(new Set([sourceKey].concat(source.aliases || [])))
+            var matches = Object.entries(result.cards).filter(function (pair2) {
+                var known = [pair2[0]].concat(pair2[1].aliases || [])
+                return aliases.some(function (alias) {
+                    return known.indexOf(alias) >= 0
+                })
+            })
+            var existingKey = matches.length ? matches[0][0] : ''
+            var knownAliases = []
+            matches.forEach(function (pair2) {
+                knownAliases = knownAliases.concat([pair2[0]], pair2[1].aliases || [])
+            })
+            var allAliases = Array.from(new Set(knownAliases.concat(aliases)))
+            var preferredKey = allAliases.find(function (alias) {
+                return /^(?:movie:)?tmdb:/.test(alias)
+            }) || existingKey || sourceKey
+            var modes = {}
+            matches.forEach(function (pair2) {
+                var candidate = etModesOf(pair2[1]).torrent
+                if (candidate && (!modes.torrent || candidate.updated_at > modes.torrent.updated_at)) modes.torrent = candidate
+            })
+            var sourceMode = etModesOf(source).torrent
+            if (sourceMode && (!modes.torrent || sourceMode.updated_at > modes.torrent.updated_at)) modes.torrent = sourceMode
+            matches.forEach(function (pair2) {
+                delete result.cards[pair2[0]]
+            })
+            var newest = etNewestMode(modes)
+            result.cards[preferredKey] = {
+                aliases: allAliases,
+                last_mode: newest ? newest.mode : '',
+                modes: modes
+            }
+        })
+        return result
+    }
+
+    function etCreateRecipeStore(Lampa) {
+        var value = etMergeHistory(Lampa.Storage.get(ET_SYNC_KEY, etEmptyHistory()), Lampa.Storage.get(ET_CACHE_KEY, etEmptyHistory()))
+        var listeners = []
+
+        function persist(next) {
+            var clean = etSanitizeHistory(next)
+            var syncBefore = JSON.stringify(Lampa.Storage.get(ET_SYNC_KEY, etEmptyHistory()))
+            value = clean
+            Lampa.Storage.set(ET_CACHE_KEY, clean, true)
+            if (syncBefore !== JSON.stringify(clean)) Lampa.Storage.set(ET_SYNC_KEY, clean)
+            listeners.slice().forEach(function (listener) {
+                return listener(clean)
+            })
+        }
+
+        function find(card) {
+            var identity = etCardIdentity(card)
+            var direct = value.cards[identity.key]
+            if (direct) return direct
+            return Object.values(value.cards).find(function (entry) {
+                return entry.aliases.some(function (alias) {
+                    return identity.aliases.indexOf(alias) >= 0
+                })
+            }) || null
+        }
+
+        function upsert(card, input) {
+            var record = etSanitizeModeRecord(input)
+            var identity = etCardIdentity(card)
+            if (!record || !identity.key) return null
+            var next = etMergeHistory(value, etEmptyHistory())
+            var previousKey = Object.keys(next.cards).find(function (key) {
+                return key === identity.key || next.cards[key].aliases.some(function (alias) {
+                    return identity.aliases.indexOf(alias) >= 0
+                })
+            })
+            var previous = previousKey ? next.cards[previousKey] : { aliases: [], modes: {} }
+            var modes = Object.assign({}, previous.modes, { torrent: record })
+            var newest = etNewestMode(modes)
+            if (previousKey && previousKey !== identity.key) delete next.cards[previousKey]
+            next.cards[identity.key] = {
+                aliases: Array.from(new Set([].concat(previous.aliases, identity.aliases))),
+                last_mode: newest.mode,
+                modes: modes
+            }
+            persist(next)
+            return next.cards[identity.key]
+        }
+
+        return {
+            read: function () {
+                return value
+            },
+            find: find,
+            upsert: upsert,
+            subscribe: function (listener) {
+                listeners.push(listener)
+                var active = true
+                return function () {
+                    if (!active) return
+                    active = false
+                    var index = listeners.indexOf(listener)
+                    if (index >= 0) listeners.splice(index, 1)
+                }
+            }
+        }
+    }
+
+    function etTorrentRecipe(input) {
+        input = input || {}
+        var magnet = etText(input.magnet || input.torrent_magnet)
+        return {
+            infohash: etText(input.infohash || input.torrent_hash),
+            magnet: magnet.indexOf('magnet:') === 0 ? magnet : '',
+            file_index: etNumber(input.file_index === undefined ? input.id : input.file_index),
+            file_path: etText(input.file_path || input.path),
+            torrent_title: etText(input.torrent_title || input.path_human || input.title)
+        }
+    }
+
+    function etUsableTorrent(input) {
+        if (!input) return null
+        var recipe = etTorrentRecipe(input)
+        return recipe.infohash && recipe.file_path ? recipe : null
+    }
+
+    function etResumeMeta(data) {
+        data = data || {}
+        var resume = data.lampac_resume || {}
+        return resume.recipe || resume
+    }
+
+    function etTorrentForItem(item, fallback) {
+        var metadata = etResumeMeta(item)
+        var source = metadata.mode === 'torrent' && metadata.torrent ? Object.assign({}, item, metadata.torrent) : item
+        var active = etUsableTorrent(source)
+        if (!active) return fallback
+        return Object.assign({}, fallback, active, {
+            magnet: active.magnet || fallback.magnet,
+            torrent_title: active.torrent_title || fallback.torrent_title
+        })
+    }
+
+    function etTimelineHash(item) {
+        return etText(item && (item.timeline_hash || item.timeline && item.timeline.hash || item.hash))
+    }
+
+    function etSameCard(left, right) {
+        var leftAliases = etCardIdentity(left).aliases
+        var rightAliases = etCardIdentity(right).aliases
+        return leftAliases.some(function (alias) {
+            return rightAliases.indexOf(alias) >= 0
+        })
+    }
+
+    function etSameItem(left, right) {
+        if (left && right && etText(left.torrent_hash) && etText(right.torrent_hash)) {
+            return etText(left.torrent_hash) === etText(right.torrent_hash) && etNumber(left.id) === etNumber(right.id)
+        }
+        var leftHash = etTimelineHash(left)
+        var rightHash = etTimelineHash(right)
+        if (leftHash && rightHash) return leftHash === rightHash
+        return Boolean(left && right && (etNumber(left.season) || etNumber(left.episode)) &&
+            etNumber(left.season) === etNumber(right.season) && etNumber(left.episode) === etNumber(right.episode))
+    }
+
+    function etItemMatch(items, data) {
+        var hash = etTimelineHash(data)
+        var torrent = data && etText(data.torrent_hash)
+        var selected = torrent && items.find(function (item) {
+            return item && etText(item.torrent_hash) && etSameItem(item, data)
+        })
+        return selected || items.find(function (item) {
+            return etTimelineHash(item) === hash
+        }) || items.find(function (item) {
+            return etNumber(item.season) === etNumber(data.season) && etNumber(item.episode) === etNumber(data.episode)
+        }) || data
+    }
+
+    function etSameProgress(left, right) {
+        return left.time === right.time && left.duration === right.duration && left.percent === right.percent
+    }
+
+    function etCreateCapture(Lampa, store, options) {
+        var stateSource = options && options.globalObject || (typeof window != 'undefined' ? window : {})
+        var session = null
+        var lastWrite = 0
+
+        function stagePlayback(data) {
+            if (!data) return null
+            var metadata = etResumeMeta(data)
+            var card = data.card
+            if (!card) {
                 try {
                     var act = Lampa.Activity.active()
-                    if (act && act.card && act.card.id) movieId = act.card.id
+                    card = (act && (act.movie || act.card)) || null
                 } catch (e) {}
             }
-            if (!url && etPlayCtx) url = etPlayCtx.url
-            if (!title && etPlayCtx) title = etPlayCtx.title
-            if (!url || !movieId) return
-            etPlayCtx = { movieId: movieId, url: url, title: title, resume: etPlayCtx && etPlayCtx.resume }
-            etStartHeartbeat()
-        } catch (e) {}
-    }
-
-    function etWrapTorrent() {
-        try {
-            if (typeof Lampa.Torrent == 'undefined' || !Lampa.Torrent) {
-                setTimeout(function () { etWrapTorrent() }, 1000)
-                return
-            }
-            if (typeof Lampa.Torrent.start == 'function' && !Lampa.Torrent.start._etWrapped) {
-                var origStart = Lampa.Torrent.start
-                Lampa.Torrent.start = function (element, movie) {
-                    etCapturePlayed(element, movie)
-                    return origStart.apply(this, arguments)
-                }
-                Lampa.Torrent.start._etWrapped = true
-            }
-            if (typeof Lampa.Torrent.play == 'function' && !Lampa.Torrent.play._etWrapped) {
-                var origPlay = Lampa.Torrent.play
-                Lampa.Torrent.play = function (element, movie) {
-                    etCapturePlayed(element, movie)
-                    return origPlay.apply(this, arguments)
-                }
-                Lampa.Torrent.play._etWrapped = true
-            }
-        } catch (e) {}
-    }
-
-    function etInjectResumeButton(activity) {
-        try {
-            if (!setting('et_resume_enabled', true)) return
-            var movie = activity && (activity.movie || activity.card)
-            if (!movie || !movie.id) return
-            var rec = etLoadResume(movie.id)
-            if (!rec || !rec.url) return
-            var $head = $('.activity--active .explorer__files-head')
-            if (!$head || !$head.length) $head = $('.explorer__files-head').filter(':visible').last()
-            if (!$head || !$head.length) return
-            if ($head.find('.et-resume-torrents').length) return
-            var label = '▶ ' + ET_STR.resume_title
-            if (rec.position) label += ' (' + etFormatTime(rec.position) + ')'
-            var $btn = $('<div class="simple-button selector et-resume-torrents">' + label + '</div>')
-            $btn.on('hover:enter', function () { etResumePlay(movie) })
-            $head.append($btn)
-            try {
-                if (Lampa.Controller && typeof Lampa.Controller.collectionAppend == 'function') Lampa.Controller.collectionAppend($btn)
-            } catch (e2) {}
-        } catch (e) {}
-    }
-
-    var etResumeDefer = null
-
-    function etMaybeResumeMenu(activity, defer) {
-        try {
-            if (!activity || activity._etResumePassed) return false
-            if (activity.component != 'torrents') return false
-            var movie = activity.movie || activity.card
-            if (!movie || !movie.id) return false
-            if (!setting('et_resume_enabled', true)) return false
-            var rec = etLoadResume(movie.id)
-            if (!rec || !rec.url) return false
-
-            etResumeDefer = defer
-
-            Lampa.Select.show({
-                title: movie.title || movie.name || ET_STR.resume_title,
-                items: [
-                    { title: ET_STR.resume_title + ' (' + etFormatTime(rec.position) + ')', action: 'resume' },
-                    { title: 'Смотреть с начала', action: 'start' }
-                ],
-                onSelect: function (sel) {
-                    if (sel.action == 'resume') {
-                        etResumePlay(movie)
-                    } else {
-                        activity._etResumePassed = true
-                        if (etResumeDefer) etResumeDefer()
-                    }
-                },
-                onBack: function () {}
+            var playlist = Array.isArray(data.playlist) ? data.playlist.slice() : []
+            var selected = etItemMatch(playlist, data)
+            var items = playlist.length ? playlist : [selected]
+            var byHash = {}
+            items.forEach(function (item) {
+                var hash = etTimelineHash(item)
+                if (hash) byHash[hash] = item
             })
-            return true
-        } catch (e) {
-            return false
+            var source = metadata && metadata.mode === 'torrent' && metadata.torrent ? Object.assign({}, data, metadata.torrent) : data
+            var torrent = etUsableTorrent(source)
+            if (!torrent || !card) return null
+            var context = typeof options.findTorrentContext === 'function' ? options.findTorrentContext(torrent.infohash) : null
+            if (context) {
+                torrent = Object.assign({}, torrent, {
+                    magnet: torrent.magnet || context.magnet,
+                    torrent_title: context.torrent_title || torrent.torrent_title
+                })
+            }
+            if (!etTimelineHash(selected) && source && source.timeline_hash) selected.timeline_hash = source.timeline_hash
+            if (etTimelineHash(selected)) byHash[etTimelineHash(selected)] = selected
+            return {
+                card: card,
+                mode: 'torrent',
+                torrent: torrent,
+                item: selected,
+                byHash: byHash,
+                progress: etSanitizeProgress(selected.timeline || {})
+            }
+        }
+
+        function recordFromSession(current) {
+            var item = current.item || {}
+            return {
+                mode: 'torrent',
+                updated_at: Date.now(),
+                episode: {
+                    season: etNumber(item.season),
+                    episode: etNumber(item.episode),
+                    timeline_hash: etTimelineHash(item)
+                },
+                progress: etSanitizeProgress(current.progress),
+                torrent: current.torrent
+            }
+        }
+
+        function commit(force) {
+            var now = Date.now()
+            if (!session || !session.confirmed || (!force && now - lastWrite < ET_WRITE_INTERVAL_MS)) return
+            lastWrite = now
+            store.upsert(session.card, recordFromSession(session))
+        }
+
+        function writeTorrentTimecode(force) {
+            if (!session || !session.external || session.mode !== 'torrent' || typeof options.writeTorrentTimecode !== 'function') return
+            options.writeTorrentTimecode(session.torrent.infohash, session.torrent.file_index, session.progress.time, force)
+        }
+
+        function onCreate(event) {
+            var data = event && event.data
+            session = stagePlayback(data)
+            if (session) {
+                session.launchedHash = etTimelineHash(session.item)
+                session.launchedProgress = Object.assign({}, session.progress)
+            }
+        }
+
+        function refreshConfirmedPlayback(data) {
+            if (!session || !data) return
+            var hash = etTimelineHash(data)
+            var current = hash && session.byHash[hash] || (etSameItem(session.item, data) ? session.item : null)
+            if (!current) return
+            var item = Object.assign({}, current, data, {
+                timeline: Object.assign({}, current.timeline || {}, data.timeline || {})
+            })
+            session.item = item
+            if (hash) session.byHash[hash] = item
+            session.progress = etSanitizeProgress(item.timeline || {})
+        }
+
+        function confirm(data, external) {
+            if (!session) session = stagePlayback(data)
+            if (!session) return
+            refreshConfirmedPlayback(data)
+            session.confirmed = true
+            session.external = external
+            commit(true)
+        }
+
+        function onStart(data) {
+            confirm(data, false)
+        }
+
+        function onExternal(data) {
+            confirm(data, true)
+        }
+
+        function onTimeline(event) {
+            if (!session || !session.confirmed || !event || !event.data) return
+            var hash = etText(event.data.hash)
+            var item = session.byHash[hash]
+            if (!item) return
+            var progress = etSanitizeProgress(event.data.road)
+            if (session.external && session.externalProgressSeen && hash === session.launchedHash && etSameProgress(progress, session.launchedProgress)) return
+            if (session.external) session.externalProgressSeen = true
+            session.item = item
+            session.torrent = etTorrentForItem(item, session.torrent)
+            session.progress = progress
+            commit(session.external)
+            writeTorrentTimecode(session.external)
+        }
+
+        function setPlaylist(playlist, position) {
+            if (!session || !Array.isArray(playlist)) return
+            session.byHash = {}
+            playlist.forEach(function (item) {
+                var hash = etTimelineHash(item)
+                if (hash) session.byHash[hash] = item
+            })
+            if (playlist[position]) {
+                session.item = playlist[position]
+                if (session.mode === 'torrent') session.torrent = etTorrentForItem(session.item, session.torrent)
+            }
+            if (session.mode === 'torrent') {
+                var currentHash = etTimelineHash(session.item)
+                if (currentHash) session.byHash[currentHash] = session.item
+            }
+        }
+
+        function onPlaylistSet(event) {
+            if (!event) return
+            setPlaylist(event.playlist, event.position)
+        }
+
+        function onPlaylistSelect(event) {
+            if (!session || !session.confirmed || !event || !event.item) return
+            commit(true)
+            setPlaylist(event.playlist, event.position)
+            session.item = event.item
+            var hash = etTimelineHash(event.item)
+            if (hash) session.byHash[hash] = event.item
+            session.progress = etSanitizeProgress(event.item.timeline || {})
+            commit(true)
+        }
+
+        function onTorrentFile(event) {
+            if (!session || session.mode !== 'torrent' || !event || event.type !== 'onenter' || !event.element) return
+            var source = Object.assign({}, event.element, {
+                card: event.element.card || (event.params && event.params.movie)
+            })
+            var torrent = etUsableTorrent(source)
+            if (!torrent || !source.card || !etSameCard(session.card, source.card) || !etSameItem(session.item, source)) return
+            session.torrent = etTorrentForItem(source, session.torrent)
+            session.item = source
+            var hash = etTimelineHash(source)
+            if (hash) session.byHash[hash] = source
+            if (session.confirmed) commit(true)
+        }
+
+        function onDestroy() {
+            if (!session) return
+            commit(true)
+            writeTorrentTimecode(true)
+            session = null
+        }
+
+        function start() {
+            if (Lampa.Player && Lampa.Player.listener) {
+                Lampa.Player.listener.follow('create', onCreate)
+                Lampa.Player.listener.follow('start', onStart)
+                Lampa.Player.listener.follow('external', onExternal)
+                Lampa.Player.listener.follow('destroy', onDestroy)
+            }
+            if (Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.listener) {
+                Lampa.PlayerPlaylist.listener.follow('set', onPlaylistSet)
+                Lampa.PlayerPlaylist.listener.follow('select', onPlaylistSelect)
+            }
+            if (Lampa.Timeline && Lampa.Timeline.listener) {
+                Lampa.Timeline.listener.follow('update', onTimeline)
+            }
+            Lampa.Listener.follow('torrent_file', onTorrentFile)
+        }
+
+        function stop() {
+            onDestroy()
+            if (Lampa.Player && Lampa.Player.listener) {
+                Lampa.Player.listener.remove('create', onCreate)
+                Lampa.Player.listener.remove('start', onStart)
+                Lampa.Player.listener.remove('external', onExternal)
+                Lampa.Player.listener.remove('destroy', onDestroy)
+            }
+            if (Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.listener) {
+                Lampa.PlayerPlaylist.listener.remove('set', onPlaylistSet)
+                Lampa.PlayerPlaylist.listener.remove('select', onPlaylistSelect)
+            }
+            if (Lampa.Timeline && Lampa.Timeline.listener) {
+                Lampa.Timeline.listener.remove('update', onTimeline)
+            }
+            Lampa.Listener.remove('torrent_file', onTorrentFile)
+        }
+
+        return {
+            start: start,
+            stop: stop,
+            currentSession: function () {
+                return session
+            }
         }
     }
 
-    function etInterceptTorrents() {
-        try {
-            if (typeof Lampa.Activity == 'undefined' || !Lampa.Activity) return
+    function etEpisodeCompleted(progress) {
+        return etSanitizeProgress(progress).percent >= ET_SEEN_PERCENT
+    }
 
-            if (typeof Lampa.Activity.push == 'function' && !Lampa.Activity.push._etWrapped) {
-                var origPush = Lampa.Activity.push
-                Lampa.Activity.push = function (activity) {
-                    var self = this
-                    var args = arguments
-                    var defer = function () { origPush.apply(self, args) }
-                    if (etMaybeResumeMenu(activity, defer)) return
-                    return origPush.apply(self, args)
-                }
-                Lampa.Activity.push._etWrapped = true
-            }
+    function etSelectLastMode(history) {
+        if (!history || !history.modes) return null
+        return Object.values(history.modes).filter(function (record) {
+            return record && record.mode === 'torrent'
+        }).sort(function (left, right) {
+            return Number(right.updated_at) - Number(left.updated_at)
+        })[0] || null
+    }
 
-            if (typeof Lampa.Activity.load == 'function' && !Lampa.Activity.load._etWrapped) {
-                var origLoad = Lampa.Activity.load
-                Lampa.Activity.load = function (activity) {
-                    var self = this
-                    var args = arguments
-                    var defer = function () { origLoad.apply(self, args) }
-                    if (etMaybeResumeMenu(activity, defer)) return
-                    return origLoad.apply(self, args)
-                }
-                Lampa.Activity.load._etWrapped = true
+    function etChooseResumeTarget(record, playlist, selected) {
+        var episode = record && record.episode ? record.episode : {}
+        var items = Array.isArray(playlist) ? playlist : []
+        var hash = episode.timeline_hash
+        var index = record && record.mode === 'torrent' && selected ? items.indexOf(selected) : -1
+        if (index < 0 && hash) index = items.findIndex(function (item) {
+            return item && item.timeline && item.timeline.hash === hash
+        })
+        if (index < 0) index = items.findIndex(function (item) {
+            return item && Number(item.season) === Number(episode.season) && Number(item.episode) === Number(episode.episode)
+        })
+        if (index < 0) throw new Error('resume-episode-missing')
+        var progress = record && record.progress ? record.progress : {}
+        if (Number(episode.season) > 0 && Number(episode.episode) > 0 && etEpisodeCompleted(progress)) {
+            if (index + 1 >= items.length) throw new Error('resume-next-episode-missing')
+            var nextIndex = index + 1
+            var item = items[nextIndex]
+            var duration = Number(item && item.timeline && item.timeline.duration)
+            return {
+                item: item,
+                index: nextIndex,
+                time: 0,
+                progress: Object.assign({
+                    time: 0
+                }, duration > 0 ? {
+                    duration: duration
+                } : {}, {
+                    percent: 0
+                })
             }
-        } catch (e) {}
+        }
+        return {
+            item: items[index],
+            index: index,
+            time: Number(progress.time) || 0,
+            progress: Object.assign({}, progress, {
+                time: Number(progress.time) || 0
+            })
+        }
+    }
+
+    function etCreateResumeOrchestrator(params) {
+        var store = params.store
+        var torrent = params.torrent
+        var launcher = params.launcher
+        return {
+            resume: function (card, beforeLaunch) {
+                return Promise.resolve().then(function () {
+                    var history = store.find(card)
+                    var record = etSelectLastMode(history)
+                    if (!record) throw new Error('resume-history-missing')
+                    var prepared = false
+                    function prepare() {
+                        if (prepared) return
+                        prepared = true
+                        if (typeof beforeLaunch === 'function') beforeLaunch()
+                    }
+                    return torrent.resolve(card, record).then(function (resolved) {
+                        if (resolved && resolved.launched === true) return
+                        var target = etChooseResumeTarget(record, resolved.playlist, resolved.item)
+                        prepare()
+                        return launcher.launch({
+                            item: target.item,
+                            playlist: resolved.playlist,
+                            progress: target.progress,
+                            card: card,
+                            mode: 'torrent'
+                        })
+                    })
+                })
+            }
+        }
+    }
+
+    function etNormalizePlaylist(playlist, selected, progress) {
+        if (!Array.isArray(playlist)) throw new Error('resume-playlist')
+        var index = playlist.indexOf(selected)
+        if (index < 0) throw new Error('resume-selected-item')
+        var normalized = playlist.map(function (item, itemIndex) {
+            if (!item || typeof item.url !== 'string' || !item.url) throw new Error('resume-playlist-url')
+            var copy = Object.assign({}, item)
+            var current = item.timeline || {}
+            var hash = current.hash || item.timeline_hash
+            if (!hash) throw new Error('resume-playlist-timeline')
+            var fresh = typeof current.handler === 'function' ? {} : Lampa.Timeline.view(hash)
+            copy.timeline = Object.assign({}, fresh || {}, current, {
+                hash: hash,
+                handler: current.handler || (fresh && fresh.handler)
+            })
+            if (typeof copy.timeline.handler !== 'function') throw new Error('resume-playlist-timeline')
+            if (itemIndex === index) {
+                copy.timeline = Object.assign({}, copy.timeline, {
+                    time: Number(progress && progress.time) || 0,
+                    duration: Number(progress && progress.duration) > 0 ? Number(progress.duration) : copy.timeline.duration,
+                    percent: Number.isFinite(Number(progress && progress.percent)) ? Number(progress.percent) : copy.timeline.percent
+                })
+            }
+            return copy
+        })
+        return {
+            item: normalized[index],
+            playlist: normalized,
+            index: index
+        }
+    }
+
+    function etCreatePlayerLauncher(Lampa) {
+        return {
+            launch: function (payload) {
+                var result = etNormalizePlaylist(payload.playlist, payload.item, payload.progress)
+                var data = Object.assign({}, result.item, {
+                    playlist: result.playlist,
+                    return_result: true
+                })
+                var android = Lampa.Platform && typeof Lampa.Platform.is === 'function' && Lampa.Platform.is('android') &&
+                    ['android'].indexOf(String(Lampa.Storage.field(payload.mode === 'torrent' ? 'player_torrent' : 'player') || '')) >= 0
+                var previous = Lampa.Storage.get('playlist_next', true)
+                return new Promise(function (resolve, reject) {
+                    var timer
+                    var finished = false
+                    function cleanup() {
+                        if (finished) return false
+                        finished = true
+                        clearTimeout(timer)
+                        if (Lampa.Player && Lampa.Player.listener) {
+                            Lampa.Player.listener.remove('start', complete)
+                            Lampa.Player.listener.remove('external', complete)
+                            Lampa.Player.listener.remove('destroy', complete)
+                        }
+                        if (android) Lampa.Storage.set('playlist_next', previous, true)
+                        return true
+                    }
+                    function complete() {
+                        if (!cleanup()) return
+                        resolve()
+                    }
+                    if (android) Lampa.Storage.set('playlist_next', true, true)
+                    if (Lampa.Player && Lampa.Player.listener) {
+                        Lampa.Player.listener.follow('start', complete)
+                        Lampa.Player.listener.follow('external', complete)
+                        Lampa.Player.listener.follow('destroy', complete)
+                    }
+                    timer = setTimeout(complete, 10000)
+                    function primeTimeline(event) {
+                        if (!event || event.data !== data) return
+                        if (Lampa.Player && Lampa.Player.listener) Lampa.Player.listener.remove('create', primeTimeline)
+                        var timeline = result.item.timeline
+                        timeline.handler(timeline.percent, timeline.time, timeline.duration)
+                    }
+                    try {
+                        if (Lampa.Player && Lampa.Player.listener) Lampa.Player.listener.follow('create', primeTimeline)
+                        Lampa.Player.play(data)
+                        if (typeof Lampa.Player.playlist === 'function') Lampa.Player.playlist(result.playlist)
+                    } catch (error) {
+                        cleanup()
+                        reject(error)
+                    } finally {
+                        if (Lampa.Player && Lampa.Player.listener) Lampa.Player.listener.remove('create', primeTimeline)
+                    }
+                })
+            }
+        }
+    }
+
+    function etExtension(path) {
+        return String(path || '').split('.').pop().toLowerCase()
+    }
+
+    function etNormalizePath(path) {
+        return String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase()
+    }
+
+    function etNaturalPath(path) {
+        return etNormalizePath(path).replace(/\d+/g, function (value) {
+            return value.length > 3 ? value : ('000' + value).slice(-4)
+        })
+    }
+
+    function etMagnet(value) {
+        return etText(value).indexOf('magnet:') === 0 ? etText(value) : ''
+    }
+
+    function etMagnetFor(recipe) {
+        recipe = recipe || {}
+        var stored = etMagnet(recipe.magnet)
+        if (stored) return stored
+        var hash = etText(recipe.infohash).toUpperCase()
+        return /^(?:[A-F0-9]{40}|[A-Z2-7]{32})$/.test(hash) ? 'magnet:?xt=urn:btih:' + hash : ''
+    }
+
+    function etCreateViewedApi(Lampa) {
+        var network = null
+        function request(payload, success, fail) {
+            try {
+                if (typeof Lampa.Reguest !== 'function' || typeof Lampa.Torserver.url !== 'function') {
+                    throw new Error('resume-torrent-viewed-api')
+                }
+                if (!network) network = new Lampa.Reguest()
+                network.timeout(5000)
+                network.silent(Lampa.Torserver.url() + '/viewed', success, fail, JSON.stringify(payload))
+            } catch (error) {
+                if (fail) fail(error)
+            }
+        }
+        return {
+            list: function (hash, success, fail) {
+                if (typeof Lampa.Torserver.viewed === 'function') return Lampa.Torserver.viewed(hash, success, fail)
+                request({
+                    action: 'list',
+                    hash: hash
+                }, success, fail)
+            },
+            set: function (hash, fileIndex, timecode, success, fail) {
+                if (typeof Lampa.Torserver.viewedSet === 'function') return Lampa.Torserver.viewedSet(hash, fileIndex, timecode)
+                request({
+                    action: 'set',
+                    hash: hash,
+                    file_index: fileIndex,
+                    timecode: timecode
+                }, success, fail)
+            }
+        }
+    }
+
+    function etHasFiles(response) {
+        return Boolean(response && (Array.isArray(response.file_stats) || Array.isArray(response.files)))
+    }
+
+    function etRequestFiles(Lampa, hash, waitMs) {
+        return new Promise(function (resolve) {
+            var settled = false
+            function finish(value) {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                resolve(value)
+            }
+            var timer = setTimeout(function () {
+                return finish(null)
+            }, waitMs)
+            try {
+                Lampa.Torserver.files(hash, function (response) {
+                    return finish(etHasFiles(response) ? response : null)
+                }, function () {
+                    return finish(null)
+                })
+            } catch (error) {
+                finish(null)
+            }
+        })
+    }
+
+    function etAddTorrent(Lampa, recipe, link, waitMs) {
+        return new Promise(function (resolve, reject) {
+            var settled = false
+            function finish(error, value) {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                if (error) reject(error)
+                else resolve(value)
+            }
+            var timer = setTimeout(function () {
+                return finish(new Error('resume-torrent-add-timeout'))
+            }, waitMs)
+            try {
+                Lampa.Torserver.hash({
+                    title: recipe.torrent_title,
+                    link: link,
+                    poster: '',
+                    data: {
+                        lampa: true
+                    }
+                }, function (result) {
+                    return finish(null, result || {})
+                }, function (error) {
+                    return finish(error || new Error('resume-torrent-add'))
+                })
+            } catch (error) {
+                finish(error)
+            }
+        })
+    }
+
+    function etWait(milliseconds) {
+        return new Promise(function (resolve) {
+            return setTimeout(resolve, milliseconds)
+        })
+    }
+
+    function etLoadFiles(Lampa, recipe, options) {
+        options = options || {}
+        var timeoutMs = Math.max(1, etNumber(options.timeoutMs) || 15000)
+        var pollMs = Math.max(1, etNumber(options.pollMs) || 250)
+        var requestTimeoutMs = Math.max(1, etNumber(options.requestTimeoutMs) || Math.min(ET_REQUEST_TIMEOUT_MS, timeoutMs))
+        var deadline = Date.now() + timeoutMs
+        return etRequestFiles(Lampa, recipe.infohash, Math.min(requestTimeoutMs, timeoutMs)).then(function (first) {
+            if (first) return {
+                response: first,
+                hash: first.hash || recipe.infohash
+            }
+            var link = etMagnetFor(recipe)
+            if (!link) throw new Error('resume-torrent-magnet')
+            var remainingForAdd = deadline - Date.now()
+            if (remainingForAdd <= 0) throw new Error('resume-torrent-timeout')
+            return etAddTorrent(Lampa, recipe, link, remainingForAdd).then(function (added) {
+                var hash = etText(added.hash) || etText(recipe.infohash)
+                if (!hash) throw new Error('resume-torrent-hash')
+                function poll() {
+                    if (Date.now() >= deadline) throw new Error('resume-torrent-timeout')
+                    var remaining = deadline - Date.now()
+                    return etRequestFiles(Lampa, hash, Math.min(requestTimeoutMs, remaining)).then(function (response) {
+                        if (response) return {
+                            response: response,
+                            hash: response.hash || hash,
+                            magnet: link
+                        }
+                        var afterRequest = deadline - Date.now()
+                        if (afterRequest <= 0) throw new Error('resume-torrent-timeout')
+                        return etWait(Math.min(pollMs, afterRequest)).then(poll)
+                    })
+                }
+                return poll()
+            })
+        })
+    }
+
+    function etBuildTorrentSubtitles(Lampa, hash, file, allFiles) {
+        var name = String(file.path || '').split(/[/\\]/).pop().split('.').slice(0, -1).join('.')
+        var index = -1
+        var subtitles = allFiles.filter(function (candidate) {
+            var short = String(candidate.path || '').split(/[/\\]/).pop()
+            return short.indexOf(name) >= 0 && ET_SUBTITLE_EXTENSIONS.indexOf(etExtension(candidate.path)) >= 0
+        }).map(function (candidate) {
+            index++
+            var segments = String(candidate.path || '').split(/[/\\]/)
+            segments.pop()
+            return {
+                label: segments.slice(1).join(' - '),
+                url: Lampa.Torserver.stream(candidate.path, hash, candidate.id).replace('&preload', '&play'),
+                index: index
+            }
+        })
+        return subtitles.length ? subtitles : false
+    }
+
+    function etBuildTorrentItem(Lampa, card, hash, file, allFiles, viewedEntries, recipe, viewedApi) {
+        var parsed = Lampa.Torserver.parse({
+            movie: card,
+            files: allFiles,
+            filename: file.path_human,
+            path: file.path,
+            is_file: ['vob', 'm2ts'].indexOf(etExtension(file.path)) >= 0
+        })
+        var timeline = Lampa.Timeline.view(parsed.hash)
+        var serverRoad = viewedEntries.find(function (item) {
+            return Number(item.file_index) === Number(file.id)
+        })
+        if (!timeline.time && serverRoad && serverRoad.timecode > 0) {
+            timeline.time = serverRoad.timecode
+            timeline.percent = timeline.duration ? Math.min(100, timeline.time / timeline.duration * 100) : 0
+        }
+        return Object.assign({}, file, {
+            card: card,
+            season: parsed.season,
+            episode: parsed.episode,
+            torrent_hash: hash,
+            url: Lampa.Torserver.stream(file.path, hash, file.id),
+            timeline: timeline,
+            subtitles: etBuildTorrentSubtitles(Lampa, hash, file, allFiles),
+            viewed: function (seconds) {
+                if (typeof Lampa.Storage.field === 'function' && Lampa.Storage.field('torrserver_tracktimecode') === true) {
+                    viewedApi.set(hash, file.id, seconds)
+                }
+            },
+            lampac_resume: {
+                mode: 'torrent',
+                torrent: {
+                    infohash: hash,
+                    magnet: etMagnet(recipe.magnet),
+                    file_index: Number(file.id),
+                    file_path: String(file.path || ''),
+                    torrent_title: etText(recipe.torrent_title)
+                }
+            }
+        })
+    }
+
+    function etCallbackPromise(executor) {
+        return new Promise(function (resolve, reject) {
+            return executor(resolve, reject)
+        })
+    }
+
+    function etCreateTorrentAdapter(Lampa) {
+        var options = {}
+        var viewedApi = etCreateViewedApi(Lampa)
+        return {
+            resolve: function (card, record) {
+                return Promise.resolve().then(function () {
+                    var recipe = record.torrent
+                    return etLoadFiles(Lampa, recipe, options).then(function (loaded) {
+                        var response = loaded.response
+                        var hash = loaded.hash
+                        var effectiveRecipe = Object.assign({}, recipe, {
+                            magnet: loaded.magnet || etMagnetFor(recipe)
+                        })
+                        var allFiles = (response.file_stats || response.files || []).slice().sort(function (left, right) {
+                            return etNaturalPath(left.path).localeCompare(etNaturalPath(right.path))
+                        })
+                        var viewedPromise = typeof Lampa.Storage.field === 'function' && Lampa.Storage.field('torrserver_tracktimecode') === true
+                            ? etCallbackPromise(function (resolve) {
+                                viewedApi.list(hash, resolve, function () {
+                                    return resolve([])
+                                })
+                            })
+                            : Promise.resolve([])
+                        return viewedPromise.then(function (viewed) {
+                            var videos = Lampa.Torserver.clearFileName(allFiles.filter(function (file) {
+                                return ET_VIDEO_EXTENSIONS.indexOf(etExtension(file.path)) >= 0
+                            }))
+                            var playlist = videos.map(function (file) {
+                                return etBuildTorrentItem(Lampa, card, hash, file, allFiles, viewed || [], effectiveRecipe, viewedApi)
+                            }).sort(function (left, right) {
+                                return Number(left.season) - Number(right.season) || Number(left.episode) - Number(right.episode) || etNaturalPath(left.path).localeCompare(etNaturalPath(right.path))
+                            })
+                            var item = playlist.find(function (file) {
+                                return Number(file.id) === Number(recipe.file_index)
+                            })
+                            if (!item) item = playlist.find(function (file) {
+                                return etNormalizePath(file.path) === etNormalizePath(recipe.file_path)
+                            })
+                            if (!item) item = playlist.find(function (file) {
+                                return Number(file.season) === Number(record.episode.season) && Number(file.episode) === Number(record.episode.episode)
+                            })
+                            if (!item || !playlist.length) throw new Error('resume-torrent-file')
+                            return {
+                                item: item,
+                                playlist: playlist
+                            }
+                        })
+                    })
+                })
+            }
+        }
+    }
+
+    function etCreateTorrentTimecodeWriter(Lampa) {
+        var writtenAt = new Map()
+        var viewedApi = etCreateViewedApi(Lampa)
+        return {
+            write: function (hash, fileIndex, seconds, force) {
+                if (typeof Lampa.Storage.field !== 'function' || Lampa.Storage.field('torrserver_tracktimecode') !== true) return
+                var key = hash + ':' + fileIndex
+                var now = Date.now()
+                if (!force && now - (writtenAt.get(key) || 0) < ET_TORRSERVER_WRITE_INTERVAL_MS) return
+                writtenAt.set(key, now)
+                viewedApi.set(hash, fileIndex, Math.round(seconds))
+            }
+        }
+    }
+
+    function etCreateTorrentContext(Lampa) {
+        var remembered = new Map()
+        var original = null
+        var wrapped = null
+        function hashKey(value) {
+            return etText(value).toUpperCase()
+        }
+        function remember(infohash, input) {
+            var key = hashKey(infohash)
+            if (!key) return
+            remembered.set(key, {
+                infohash: key,
+                magnet: etMagnet(input.link),
+                torrent_title: etText(input.title)
+            })
+        }
+        return {
+            start: function () {
+                if (wrapped || !Lampa.Torserver || typeof Lampa.Torserver.hash !== 'function') return this
+                original = Lampa.Torserver.hash
+                wrapped = function (input, success, fail) {
+                    return original.call(this, input, function (result) {
+                        remember(result && result.hash, input)
+                        if (typeof success === 'function') success(result)
+                    }, fail)
+                }
+                Lampa.Torserver.hash = wrapped
+                return this
+            },
+            stop: function () {
+                if (!wrapped) return this
+                if (Lampa.Torserver && Lampa.Torserver.hash === wrapped) Lampa.Torserver.hash = original
+                original = null
+                wrapped = null
+                return this
+            },
+            find: function (infohash) {
+                var found = remembered.get(hashKey(infohash))
+                return found ? Object.assign({}, found) : null
+            }
+        }
+    }
+
+    function etRootFor(event) {
+        if (event && event.body && typeof event.body.find === 'function') return event.body
+        var activity = event && event.object && event.object.activity
+        if (!activity || typeof activity.render !== 'function') return null
+        var rendered = activity.render()
+        if (rendered && typeof rendered.find === 'function') return rendered
+        return typeof $ === 'function' ? $(rendered) : null
+    }
+
+    function etLatestRecord(history, series) {
+        if (!history || !history.modes) return null
+        return Object.values(history.modes).filter(function (record) {
+            return record && record.mode === 'torrent'
+        }).filter(function (record) {
+            return !series || record.episode && Number(record.episode.season) > 0 && Number(record.episode.episode) > 0
+        }).sort(function (left, right) {
+            return Number(right.updated_at) - Number(left.updated_at)
+        })[0] || null
+    }
+
+    function etIsSeries(card) {
+        return card && Number(card.number_of_seasons) > 0
+    }
+
+    function etLabelFor(record) {
+        return 'S' + String(Number(record.episode.season)).padStart(2, '0') + 'E' + String(Number(record.episode.episode)).padStart(2, '0')
+    }
+
+    function etActionContainer(root) {
+        return root.find('.full-start-new__buttons, .full-start__buttons').last()
+    }
+
+    function etModeAction(root, mode) {
+        var container = etActionContainer(root)
+        var actions = container.length ? container.find('.view--' + mode) : root.find('.view--' + mode)
+        if (!actions.length) actions = root.find('.view--' + mode)
+        return actions.last()
+    }
+
+    function etResumeButtonText(label, progress) {
+        if (!label) return 'Продолжить просмотр'
+        return etEpisodeCompleted(progress) ? 'Следующая серия · ' + label : 'Продолжить просмотр · ' + label
+    }
+
+    function etRenderButton(label, progress) {
+        var dash = (etSanitizeProgress(progress).percent * 65.97 / 100).toFixed(2)
+        return '<div class="full-start__button selector view--watch-resume">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none">' +
+            '<circle cx="12" cy="12" r="10.5" stroke="currentColor" stroke-width="1.7" opacity="0.22"/>' +
+            '<circle class="watch-resume__progress" cx="12" cy="12" r="10.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="' + dash + ' 65.97" transform="rotate(-90 12 12)"/>' +
+            '<path fill="currentColor" d="M9 7v10l8-5z"/></svg>' +
+            '<span>' + etResumeButtonText(label, progress) + '</span>' +
+            '</div>'
+    }
+
+    function etCreateResumeButton(Lampa, store, orchestrator) {
+        var started = false
+        var unsubscribe = null
+        var currentEvent = null
+        var pending = false
+
+        function showFailure() {
+            if (Lampa.Noty && typeof Lampa.Noty.show === 'function') Lampa.Noty.show('Не удалось восстановить просмотр')
+        }
+
+        function onFullEvent(event) {
+            if (!event || event.type !== 'complite') return
+            currentEvent = event
+            var card = event.data && event.data.movie
+            var root = etRootFor(event)
+            if (!root) return
+            var existing = root.find('.view--watch-resume')
+            if (!card) {
+                existing.remove()
+                return
+            }
+            var record = etLatestRecord(store.find(card), etIsSeries(card))
+            if (!record) {
+                existing.remove()
+                return
+            }
+            if (existing.length) {
+                existing.find('.watch-resume__progress').attr('stroke-dasharray', (etSanitizeProgress(record.progress).percent * 65.97 / 100).toFixed(2) + ' 65.97')
+                existing.find('span').text(etResumeButtonText(etIsSeries(card) ? etLabelFor(record) : '', record.progress))
+                return
+            }
+            var button = $(etRenderButton(etIsSeries(card) ? etLabelFor(record) : '', record.progress))
+            button.on('hover:enter', function () {
+                if (pending) return
+                pending = true
+                var loading = true
+                function stopLoading() {
+                    if (!loading) return
+                    loading = false
+                    if (Lampa.Loading && typeof Lampa.Loading.stop === 'function') Lampa.Loading.stop()
+                }
+                if (Lampa.Loading && typeof Lampa.Loading.start === 'function') Lampa.Loading.start()
+                orchestrator.resume(card, stopLoading)
+                    .then(function () {
+                        stopLoading()
+                    })
+                    .catch(function () {
+                        stopLoading()
+                        showFailure()
+                    })
+                    .then(function () {
+                        pending = false
+                    })
+            })
+            var container = etActionContainer(root)
+            var online = container.length ? container.find('.view--online').last() : root.find('.view--online').last()
+            var torrent = container.length ? container.find('.view--torrent').last() : root.find('.view--torrent').last()
+            if (online.length) online.after(button)
+            else if (torrent.length) torrent.after(button)
+            else if (container.length) container.append(button)
+        }
+
+        return {
+            start: function () {
+                if (started) return this
+                started = true
+                Lampa.Listener.follow('full', onFullEvent)
+                if (store && typeof store.subscribe === 'function') {
+                    unsubscribe = store.subscribe(function () {
+                        if (currentEvent) onFullEvent(currentEvent)
+                    })
+                }
+                var active = Lampa.Activity && typeof Lampa.Activity.active === 'function' ? Lampa.Activity.active() : null
+                if (active && active.component === 'full') {
+                    onFullEvent({
+                        type: 'complite',
+                        object: active,
+                        data: {
+                            movie: active.card || active.movie
+                        }
+                    })
+                }
+                return this
+            },
+            stop: function () {
+                if (!started) return this
+                started = false
+                Lampa.Listener.remove('full', onFullEvent)
+                if (typeof unsubscribe === 'function') unsubscribe()
+                unsubscribe = null
+                currentEvent = null
+                return this
+            }
+        }
+    }
+
+    function etCreateResumeRuntime(Lampa) {
+        var store = etCreateRecipeStore(Lampa)
+        var torrentTimecodes = etCreateTorrentTimecodeWriter(Lampa)
+        var torrentContext = etCreateTorrentContext(Lampa)
+        var capture = etCreateCapture(Lampa, store, {
+            findTorrentContext: torrentContext.find,
+            writeTorrentTimecode: torrentTimecodes.write,
+            globalObject: typeof window != 'undefined' ? window : {}
+        })
+        var launcher = etCreatePlayerLauncher(Lampa)
+        var orchestrator = etCreateResumeOrchestrator({
+            store: store,
+            torrent: etCreateTorrentAdapter(Lampa),
+            launcher: launcher
+        })
+        var button = etCreateResumeButton(Lampa, store, orchestrator)
+        var canCapture = Lampa.Player && Lampa.Player.listener && Lampa.PlayerPlaylist && Lampa.PlayerPlaylist.listener && Lampa.Timeline && Lampa.Timeline.listener
+        return {
+            start: function () {
+                if (canCapture) {
+                    torrentContext.start()
+                    capture.start()
+                }
+                button.start()
+                return this
+            },
+            stop: function () {
+                if (canCapture) {
+                    capture.stop()
+                    torrentContext.stop()
+                }
+                button.stop()
+                return this
+            }
+        }
+    }
+
+    function etResumeStart() {
+        if (etResumeRuntime) return
+        etResumeRuntime = etCreateResumeRuntime(Lampa)
+        etResumeRuntime.start()
+    }
+
+    function etResumeStop() {
+        if (!etResumeRuntime) return
+        etResumeRuntime.stop()
+        etResumeRuntime = null
     }
 
     /* ------- Настройки ------- */
@@ -3190,20 +4122,9 @@
         gap: 0.7em;
         padding: 0.65em 0.9em 0.75em;
     }
-    .torrent-recommend-panel__meta{
+.torrent-recommend-panel__meta{
         display: none;
     }
-}
-.et-resume-torrents{
-    color: rgba(255,235,140,0.95);
-    background: rgba(255,215,0,0.10);
-    border: 1px solid rgba(255,215,0,0.25);
-    border-radius: 0.5em;
-    font-weight: 700;
-}
-.et-resume-torrents.focus{
-    background: rgba(255,215,0,0.25);
-    color: #fff;
 }
 `
         $('<style id="et-style">').html(css).appendTo('head')
@@ -3214,14 +4135,11 @@
         etSettingsInit()
         etStyleInit()
         etPatchParser()
-        etInterceptTorrents()
-        etWrapTorrent()
+        etResumeStart()
 
         Lampa.Listener.follow('torrent', function (e) {
             if (e.type == 'render') etRenderPanel(e)
         })
-
-        Lampa.Listener.follow('player', etOnPlayer)
 
         Lampa.Listener.follow('activity', function (e) {
             if (e.type == 'start' && e.component == 'torrents') console.log('[EasyTorrent] Новая страница торрентов')
