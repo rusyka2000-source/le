@@ -2087,9 +2087,9 @@
         return m2 ? Math.round(parseFloat(m2[1])) : 0
     }
 
-    var ET_AUDIO_MAP = {
-        'Дубляж RU': ['дубляж', 'дб', 'd', 'dub'],
-        'Дубляж UKR': ['ukr'],
+var ET_AUDIO_MAP = {
+        'Дубляж RU': ['дубляж', 'дб', 'dub', 'рус'],
+        'Дубляж UKR': ['ukr', 'укр'],
         'Дубляж Пифагор': ['пифагор'],
         'Дубляж Red Head Sound': ['red head sound', 'rhs'],
         'Дубляж Videofilm': ['videofilm'],
@@ -2146,9 +2146,14 @@
         })
     }
 
-    function etAudioTracks(element, item, isSeries, seasonCount) {
+    function etIsUkrainianKey(key) {
+        return key.indexOf('UKR') >= 0 || key.indexOf('укр') >= 0
+    }
+
+function etAudioTracks(element, item, isSeries, seasonCount) {
         var title = (element.Title || element.title || '').toLowerCase()
         var found = []
+        var ukrViaTag = false
         if (element.ffprobe && Array.isArray(element.ffprobe)) {
             element.ffprobe.filter(function (s) { return s.codec_type === 'audio' }).forEach(function (st) {
                 var tags = st.tags || {}
@@ -2170,17 +2175,28 @@
                     })
                     if (matched) keys.push(k)
                 }
-                keys.forEach(function (k) { if (found.indexOf(k) < 0) found.push(k) })
+                if (lang === 'ukr' || lang === 'uk' || lang === 'ukrainian' ||
+                    (keys.indexOf('Дубляж UKR') >= 0)) ukrViaTag = true
+                keys.forEach(function (k) {
+                    if (k === 'Дубляж RU' && (lang === 'ukr' || lang === 'uk')) return
+                    if (found.indexOf(k) < 0) found.push(k)
+                })
             })
         }
         for (var k in ET_AUDIO_MAP) {
             if (found.indexOf(k) >= 0) continue
+            if (etIsUkrainianKey(k)) continue
             var matched = ET_AUDIO_MAP[k].some(function (alt) {
                 var a = alt.toLowerCase()
                 if (a.length <= 3) return new RegExp('\\b' + etEscRe(a) + '\\b', 'i').test(title)
                 return title.indexOf(a) >= 0
             })
             if (matched) found.push(k)
+        }
+        if (ukrViaTag && found.indexOf('Дубляж UKR') < 0) found.push('Дубляж UKR')
+        if (!ukrViaTag) {
+            var ukrIdx = found.indexOf('Дубляж UKR')
+            if (ukrIdx >= 0) found.splice(ukrIdx, 1)
         }
         return found
     }
@@ -2233,13 +2249,13 @@
             a.bitrate = bitScore
             total += bitScore
 
-            var audW = ((rules.weights && rules.weights.audio_track) || 100) / 100
+var audW = ((rules.weights && rules.weights.audio_track) || 100) / 100
             var pref = cfg.audio_track_priority || []
             var tracks = feats.audio_tracks || []
             var audScore = 0
             for (var j = 0; j < pref.length; j++) {
                 var key = pref[j]
-                var matched = tracks.some(function (tr) { return etAudioMatch(tr, key) })
+                var matched = tracks.indexOf(key) >= 0
                 if (matched) {
                     audScore = 15 * (pref.length - j) * audW
                     break
