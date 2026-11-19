@@ -16,9 +16,9 @@
 
     var manifest = {
         type: 'video',
-        version: '1.5.0',
+        version: '1.6.0',
         name: 'Кинопоиск: сборы, награды, актёры и трейлеры',
-        description: 'Сборы, награды, информация об актёрах и трейлеры с Кинопоиска',
+        description: 'Сборы, награды, информация об актёрах и трейлеры с Кинопоиска. Рекомендации торрентов и «Продолжить просмотр»',
         component: 'kinopoisk_info'
     }
 
@@ -1651,6 +1651,1500 @@
         }
     }
 
+    /* ================================================================
+       EasyTorrent: система рекомендаций торрентов (внедрена полностью)
+       Русский язык, по умолчанию SDR оценивается выше HDR
+       ================================================================ */
+
+    var ET_VERSION = '1.0.0 Beta'
+    var ET_QR_PAGE = 'https://darkestclouds.github.io/plugins/easytorrent/'
+    var ET_QR_API = 'https://wozuelafumpzgvllcjne.supabase.co'
+    var ET_QR_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvenVlbGFmdW1wemd2bGxjam5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5Mjg1MDgsImV4cCI6MjA4MjUwNDUwOH0.ODnHlq_P-1wr_D6Jwaba1mLXIVuGBnnUZsrHI8Twdug'
+
+    var ET_STR = {
+        name: 'Торрент-рекомендации',
+        version: ET_VERSION,
+        title: 'Торрент-рекомендации',
+        desc: 'Рекомендации торрентов на основе качества, HDR и озвучки',
+        show_scores: 'Показывать оценки',
+        show_scores_desc: 'Отображать оценку качества торрента',
+        ideal: 'Идеальный',
+        recommended: 'Рекомендуется',
+        config_json: 'Конфигурация (JSON)',
+        config_json_desc: 'Нажмите для просмотра или изменения настроек',
+        config_view: 'Просмотреть параметры',
+        config_edit: 'Вставить JSON',
+        config_reset: 'Сбросить к заводским',
+        config_error: 'Ошибка: неверный формат JSON',
+        resume_title: 'Продолжить просмотр',
+        resume_desc: 'Открывать последний просмотренный торрент с места остановки'
+    }
+
+    var ET_DEFAULT_CONFIG = {
+        version: '2.0',
+        generated: '2025-12-27T13:43:12.099Z',
+        device: {
+            type: 'tv_4k',
+            supported_hdr: ['hdr10', 'hdr10plus'],
+            supported_audio: ['stereo', 'surround_51']
+        },
+        network: { speed: 'very_fast', stability: 'stable' },
+        parameter_priority: ['audio_track', 'resolution', 'availability', 'bitrate', 'hdr', 'audio_quality'],
+        audio_track_priority: ['Дубляж RU', 'MVO HDRezka', 'MVO LostFilm', 'MVO Кубик в Кубе', 'MVO NewStudio', 'Original'],
+        preferences: { min_seeds: 3, recommendation_count: 3 },
+        scoring_rules: {
+            weights: { audio_track: 100, resolution: 85, availability: 70, bitrate: 55, hdr: 40, audio_quality: 25 },
+            resolution: { 480: -60, 720: -30, 1080: 17, 1440: 42.5, 2160: 85 },
+            hdr: { dolby_vision: -14, hdr10plus: -14, hdr10: -14, sdr: 40 },
+            bitrate_bonus: {
+                thresholds: [
+                    { min: 0, max: 15, bonus: 0 },
+                    { min: 15, max: 30, bonus: 15 },
+                    { min: 30, max: 60, bonus: 30 },
+                    { min: 60, max: 999, bonus: 35 }
+                ],
+                weight: 0.55
+            },
+            availability: { weight: 0.7, min_seeds: 2 },
+            audio_quality: { weight: 0.25 },
+            audio_track: { weight: 1 }
+        }
+    }
+
+    var etConfig = null
+    var ET_HDR_LABEL = { dolby_vision: 'DV', hdr10plus: 'HDR10+', hdr10: 'HDR10', sdr: 'SDR' }
+
+    function etLoadConfig() {
+        var saved = null
+        try { saved = Lampa.Storage.get('et_config_json', null) } catch (e) {}
+        if (saved) {
+            try {
+                var cfg = typeof saved == 'string' ? JSON.parse(saved) : saved
+                if (cfg && (cfg.version === '2.0' || cfg.version === 2)) {
+                    etConfig = cfg
+                    return
+                }
+            } catch (e) {}
+        }
+        etConfig = ET_DEFAULT_CONFIG
+    }
+
+    function etSaveConfig(obj) {
+        var str = typeof obj == 'string' ? obj : JSON.stringify(obj)
+        try { Lampa.Storage.set('et_config_json', str) } catch (e) {}
+        try { etConfig = JSON.parse(str) } catch (e) { etConfig = ET_DEFAULT_CONFIG }
+    }
+
+    function etToInt(s) {
+        var n = parseInt(s, 10)
+        return Number.isFinite(n) ? n : null
+    }
+
+    function etRange(a, b) {
+        if (a == null) return null
+        if (b == null || b === a) return { start: a, end: a }
+        return { start: Math.min(a, b), end: Math.max(a, b) }
+    }
+
+    function etValidSeason(n) {
+        return Number.isInteger(n) && n >= 1 && n <= 60
+    }
+
+    function etValidEpisode(n) {
+        return Number.isInteger(n) && n >= 0 && n <= 5000
+    }
+
+    function etValidRange(a, b) {
+        return Number.isInteger(a) && Number.isInteger(b) &&
+            a >= 1900 && a <= 2100 && b >= 1900 && b <= 2100 && b >= a && b - a <= 60
+    }
+
+    function etNormalizeTitle(raw) {
+        var t = String(raw == null ? '' : raw)
+        t = t.replace(/[\u2012\u2013\u2014\u2212]/g, '-')
+        t = t.replace(/х/gi, 'x')
+        t = t.replace(/\u00A0/g, ' ')
+        t = t.replace(/\s+/g, ' ').trim()
+        return t
+    }
+
+    function etEscRe(s) {
+        return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+
+    function etTrashTitle(raw) {
+        var t = String(raw || '').toLowerCase()
+        var patterns = [
+            /(?:^|[^\p{L}\p{N}])(фильм|film|movie|movies)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(спецвыпуск|special|specials|sp|ova|ona|bonus|extra|экстра|спэшл|спешл|спэшал|ова|она|спэшел)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(трейлер|trailer|teaser|тизер)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(саундтрек|ost|soundtrack)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(клип|clip|pv)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(интервью|interview)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(репортаж|report)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(промо|promo)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(отрывок|preview)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(анонс|announcement)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(съемки|making of|behind the scenes)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(сборник|collection)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(документальный|docu|documentary)(?=$|[^\p{L}\p{N}])/iu,
+            /(?:^|[^\p{L}\p{N}])(концерт|concert|live)(?=$|[^\p{L}\p{N}])/iu,
+            /movie\s*\d+/i,
+            /film\s*\d+/i,
+            /(?:^|[^\p{L}\p{N}])(мультфильм|аниме-фильм|спецэпизод|спецсерія)(?=$|[^\p{L}\p{N}])/iu,
+            /\bepisode of\b/i
+        ]
+        for (var i = 0; i < patterns.length; i++) {
+            if (patterns[i].test(t)) return true
+        }
+        return false
+    }
+
+    function etDub2x2(text, index, match) {
+        if (String(match).toLowerCase().replace(/\s+/g, '') === '2x2') return true
+        var before = text.slice(Math.max(0, index - 12), index).toLowerCase()
+        var after = text.slice(index + match.length, index + match.length + 12).toLowerCase()
+        return /(дб|dub)\s*\(/i.test(before) && /^\s*\)/.test(after)
+    }
+
+    function etConfidence(par) {
+        if (par.title && etTrashTitle(par.title)) return 0
+        var i = par.season != null ? par.season : (par.seasonRange ? par.seasonRange.start : null)
+        var l = par.episode != null ? par.episode : (par.episodeRange ? par.episodeRange.start : null)
+        var sc = par.base
+        if (i != null) sc += 10
+        if (l != null) sc += 10
+        if (i != null && l != null) sc += 15
+        if (par.seasonRange && par.seasonRange.end !== par.seasonRange.start) sc += 5
+        if (par.episodeRange && par.episodeRange.end !== par.episodeRange.start) sc += 5
+        if (i != null && !etValidSeason(i)) sc -= 60
+        if (l != null && !etValidEpisode(l)) sc -= 60
+        return Number.isFinite(sc) ? Math.max(0, Math.min(100, Math.round(sc))) : 0
+    }
+
+    function etParseTorrentTitle(raw) {
+        var text = etNormalizeTitle(raw)
+        var total = null
+        var mTotal = /(?:^|[^\p{L}\p{N}])(?:из|of)\s*(\d{1,4})(?=$|[^\p{L}\p{N}])/iu.exec(text)
+        if (mTotal) {
+            var n = etToInt(mTotal[1])
+            if (etValidEpisode(n)) total = n
+        }
+        if (etTrashTitle(text)) return { season: null, episode: null, source: 'trash', confidence: 0 }
+
+        var seasonCandidates = []
+        var episodeCandidates = []
+
+        var m1 = /s(\d{1,2})\s*[ex](\d{1,3})(?:\s*[-]\s*[ex]?(\d{1,3}))?\b/i.exec(text)
+        if (m1) {
+            var s1 = etToInt(m1[1])
+            var e1 = etRange(etToInt(m1[2]), etToInt(m1[3]))
+            var ep1 = e1 ? e1.start : null
+            if (etValidSeason(s1)) seasonCandidates.push({ season: s1, base: 90, name: 'SxxEyy' })
+            if (etValidEpisode(ep1)) episodeCandidates.push({ episode: ep1, episodeRange: e1, base: 90, name: 'SxxEyy' })
+        }
+
+        var m2 = /\b(\d{1,2})\s*[-]\s*(\d{1,2})\s*x\s*(\d{1,3})(?:\s*[-]\s*(\d{1,4}))?\b/i.exec(text)
+        if (m2 && !etDub2x2(text, m2.index, m2[0])) {
+            var sA = etToInt(m2[1])
+            var sB = etToInt(m2[2])
+            var eA = etToInt(m2[3])
+            var eB = etToInt(m2[4])
+            var sRange = etRange(sA, sB)
+            var eRange = etRange(eA, eB)
+            if (sRange && etValidSeason(sRange.start) && etValidSeason(sRange.end)) {
+                seasonCandidates.push({
+                    season: sRange.start,
+                    seasonRange: sRange.start !== sRange.end ? sRange : undefined,
+                    base: 92,
+                    name: 'Srange x Erange'
+                })
+            }
+            if (eRange && etValidEpisode(eRange.start) && etValidEpisode(eRange.end)) {
+                episodeCandidates.push({
+                    episode: eRange.start,
+                    episodeRange: eRange.start !== eRange.end ? eRange : undefined,
+                    base: 92,
+                    name: 'Srange x Erange'
+                })
+            }
+        }
+
+        var m3 = /\b(\d{1,2})\s*x\s*(\d{1,3})(?:\s*[-]\s*(\d{1,3}))?\b/i.exec(text)
+        if (m3 && !etDub2x2(text, m3.index, m3[0])) {
+            var s3 = etToInt(m3[1])
+            var e3 = etRange(etToInt(m3[2]), etToInt(m3[3]))
+            var ep3 = e3 ? e3.start : null
+            if (etValidSeason(s3)) seasonCandidates.push({ season: s3, base: 85, name: 'xxXyy' })
+            if (etValidEpisode(ep3)) episodeCandidates.push({ episode: ep3, episodeRange: e3, base: 85, name: 'xxXyy' })
+        }
+
+        var bracketRe = /[\[\(]([^\]\)]+)[\]\)]?/g
+        var bm
+        while ((bm = bracketRe.exec(text)) !== null) {
+            var inner = bm[1]
+            var rangeRe = /(\d{1,4})\s*[-]\s*(\d{1,4})/g
+            var rm
+            while ((rm = rangeRe.exec(inner)) !== null) {
+                var a = etToInt(rm[1])
+                var b = etToInt(rm[2])
+                if (a == null || b == null || etValidRange(a, b)) continue
+                var after = inner.slice(rm.index + rm[0].length, rm.index + rm[0].length + 12).toLowerCase()
+                var before = inner.slice(Math.max(0, rm.index - 12), rm.index).toLowerCase()
+                var hint = /(эп|ep|из|of|tv|series|сер)/i.test(before + ' ' + after)
+                if (!(hint || Math.max(a, b) >= 50)) continue
+                var range = etRange(a, b)
+                var start = range ? range.start : null
+                episodeCandidates.push({
+                    episode: etValidEpisode(start) ? start : null,
+                    episodeRange: range && etValidEpisode(range.start) ? range : undefined,
+                    base: hint ? 75 : 70,
+                    name: 'bracket range'
+                })
+            }
+            var singleRe = /(?:эп|ep|сер|серия)\s*(\d{1,4})(?=$|[^\d])/i
+            var singleMatch = /(?:^|[^\d])(\d{1,4})(?:\s*(?:из|эп|ep|сер|of|from))(?=$|[^\d])/i.exec(inner) || singleRe.exec(inner)
+            if (singleMatch) {
+                var sv = etToInt(singleMatch[1])
+                if (etValidEpisode(sv)) episodeCandidates.push({ episode: sv, base: 65, name: 'bracket single' })
+            }
+        }
+
+        var seasonPatterns = [
+            { re: /(?:^|[^\p{L}\p{N}])(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?\s*сезон(?:а|ы|ів)?(?=$|[^\p{L}\p{N}])/iu, base: 75, name: 'N сезон' },
+            { re: /(?:^|[^\p{L}\p{N}])сезон(?:а|ы|и|ів)?\s*(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?(?=$|[^\p{L}\p{N}])/iu, base: 70, name: 'Сезон N' },
+            { re: /(?:^|[^\p{L}\p{N}])сезон(?:а|ы|и|ів)?\s*:\s*(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?/iu, base: 66, name: 'Сезон: N' },
+            { re: /\bseason\s*[: ]\s*(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?\b/i, base: 55, name: 'Season:' },
+            { re: /\bseason\s*(\d{1,2})\b/i, base: 52, name: 'Season N' },
+            { re: /\[\s*s(\d{1,2})\s*\]/i, base: 80, name: '[Sxx]' },
+            { re: /\bs(\d{1,2})\b/i, base: 50, name: 'Sxx (season-only)' }
+        ]
+        for (var spi = 0; spi < seasonPatterns.length; spi++) {
+            var sp = seasonPatterns[spi]
+            var sm = sp.re.exec(text)
+            if (!sm) continue
+            if (sp.name === 'Сезон: N') {
+                var tail = text.slice(sm.index + sm[0].length, sm.index + sm[0].length + 20).toLowerCase()
+                if (/^[\s]* (сер|series|episode|эпиз)/i.test(tail)) continue
+            }
+            var va = etToInt(sm[1])
+            var vb = etToInt(sm[2])
+            if (va == null) continue
+            var range = etRange(va, vb)
+            seasonCandidates.push({
+                season: range ? range.start : null,
+                seasonRange: range && range.end !== range.start ? range : undefined,
+                base: sp.base,
+                name: sp.name
+            })
+        }
+
+        var episodePatterns = [
+            { re: /(?:^|[^\p{L}\p{N}])(?:серии|серія|серії|эпизод(?:ы)?|episodes|эп\.?)\s*[: ]?\s*(\d{1,4})(?:\s*[-]\s*(\d{1,4}))?(?=$|[^\p{L}\p{N}])/iu, base: 60, name: 'серии' },
+            { re: /(?:^|[^\p{L}\p{N}])(\d{1,4})(?:\s*[-]\s*(\d{1,4}))?\s*(?:серии|серія|серії|эпизод(?:ы)?|эп\.?)(?=$|[^\p{L}\p{N}])/iu, base: 62, name: '1-4 серии' },
+            { re: /(?:^|[^\p{L}\p{N}])(\d{1,4})\s*[-]\s*(\d{1,4})\s*серия(?=$|[^\p{L}\p{N}])/iu, base: 62, name: '1-4 серия' },
+            { re: /(?:^|[^\p{L}\p{N}])(\d{1,4})\s*(?:серия|серія)(?=$|[^\p{L}\p{N}])/iu, base: 54, name: 'N серия' },
+            { re: /(?:серии|серії)\s*(\d{1,4})\s*из\s*(\d{1,4})/iu, base: 65, name: 'серии X из Y' }
+        ]
+        for (var epi = 0; epi < episodePatterns.length; epi++) {
+            var ep = episodePatterns[epi]
+            var em = ep.re.exec(text)
+            if (!em) continue
+            var va2 = etToInt(em[1])
+            var vb2 = etToInt(em[2])
+            if (va2 == null) continue
+            var range2 = etRange(va2, vb2)
+            episodeCandidates.push({
+                episode: range2 ? range2.start : null,
+                episodeRange: range2 && range2.end !== range2.start ? range2 : undefined,
+                base: ep.base,
+                name: ep.name
+            })
+        }
+
+        seasonCandidates.sort(function (a, b) { return b.base - a.base })
+        episodeCandidates.sort(function (a, b) { return b.base - a.base })
+        var bestSeason = seasonCandidates[0] || null
+        var bestEpisode = episodeCandidates[0] || null
+
+        if (bestSeason || bestEpisode) {
+            var seasonVal = bestSeason && bestSeason.season != null && etValidSeason(bestSeason.season) ? bestSeason.season : null
+            var episodeVal = bestEpisode && bestEpisode.episode != null && etValidEpisode(bestEpisode.episode) ? bestEpisode.episode : null
+            var sRange = bestSeason ? bestSeason.seasonRange : undefined
+            var eRange = bestEpisode ? bestEpisode.episodeRange : undefined
+            var epCount = eRange ? eRange.end - eRange.start + 1 : (episodeVal != null ? 1 : null)
+            return {
+                season: seasonVal,
+                seasonRange: sRange,
+                episode: episodeVal,
+                episodeRange: eRange,
+                episodesTotal: total,
+                episodesCount: epCount,
+                source: [bestSeason && bestSeason.name, bestEpisode && bestEpisode.name].filter(Boolean).join(' + ') || 'heuristic',
+                confidence: etConfidence({
+                    season: seasonVal,
+                    seasonRange: sRange,
+                    episode: episodeVal,
+                    episodeRange: eRange,
+                    base: Math.max(bestSeason ? bestSeason.base : 0, bestEpisode ? bestEpisode.base : 0),
+                    title: text
+                })
+            }
+        }
+        return { season: null, episode: null, source: 'none', confidence: 0 }
+    }
+
+    function etResolution(element) {
+        var t = (element.Title || element.title || '').toLowerCase()
+        if (element.ffprobe && Array.isArray(element.ffprobe)) {
+            var v = element.ffprobe.find(function (s) { return s.codec_type === 'video' })
+            if (v && v.height) {
+                return v.height >= 2160 || (v.width && v.width >= 3800) ? 2160
+                    : v.height >= 1440 || (v.width && v.width >= 2500) ? 1440
+                        : v.height >= 1080 || (v.width && v.width >= 1900) ? 1080
+                            : v.height >= 720 || (v.width && v.width >= 1260) ? 720
+                                : 480
+            }
+        }
+        if (/\b2160p\b/.test(t) || /\b4k\b/.test(t)) return 2160
+        if (/\b1440p\b/.test(t) || /\b2k\b/.test(t)) return 1440
+        if (/\b1080p\b/.test(t)) return 1080
+        if (/\b720p\b/.test(t)) return 720
+        return null
+    }
+
+    function etHdrType(element) {
+        var t = (element.Title || element.title || '').toLowerCase()
+        var n = []
+        if (element.ffprobe && Array.isArray(element.ffprobe)) {
+            var v = element.ffprobe.find(function (s) { return s.codec_type === 'video' })
+            if (v && v.side_data_list) {
+                v.side_data_list.some(function (s) {
+                    return s.side_data_type === 'DOVI configuration record' || s.side_data_type === 'Dolby Vision RPU'
+                }) && n.push('dolby_vision')
+            }
+        }
+        var hasHdr10p = t.indexOf('hdr10+') >= 0 || t.indexOf('hdr10plus') >= 0 || t.indexOf('hdr10 plus') >= 0
+        if (hasHdr10p && n.indexOf('hdr10plus') < 0) n.push('hdr10plus')
+        var hasHdr10 = t.indexOf('hdr10') >= 0 || /hdr-?10/.test(t)
+        if (hasHdr10 && n.indexOf('hdr10') < 0) n.push('hdr10')
+        var hasDv = t.indexOf('dolby vision') >= 0 || t.indexOf('dovi') >= 0 ||
+            /\sp8\s/.test(t) || /\(dv\)/.test(t) || /\[dv\]/.test(t) || /\sdv\s/.test(t) || /,\s*dv\s/.test(t)
+        if (hasDv && n.indexOf('dolby_vision') < 0) n.push('dolby_vision')
+        var hasGeneric = /\bhdr\b/.test(t) || t.indexOf('[hdr]') >= 0 || t.indexOf('(hdr)') >= 0 || t.indexOf(', hdr') >= 0
+        if (!hasGeneric && n.indexOf('hdr10plus') < 0 && n.indexOf('hdr10') < 0) n.push('hdr10')
+        var hasSdr = t.indexOf('sdr') >= 0 || t.indexOf('[sdr]') >= 0 || t.indexOf('(sdr)') >= 0
+        if (hasSdr && n.indexOf('sdr') < 0) n.push('sdr')
+        if (n.length === 0) return 'sdr'
+        var rules = (etConfig.scoring_rules && etConfig.scoring_rules.hdr) || { dolby_vision: 24, hdr10plus: 40, hdr10: 32, sdr: -14 }
+        var best = n[0]
+        var bestScore = rules[best] || 0
+        n.forEach(function (type) {
+            var s = rules[type] || 0
+            if (s > bestScore) { bestScore = s; best = type }
+        })
+        return best
+    }
+
+    function etBitrate(element, item, isSeries, seasonCount) {
+        var title = element.Title || element.title || ''
+        var size = element.Size || element.size_bytes || 0
+        if (element.ffprobe && Array.isArray(element.ffprobe)) {
+            var v = element.ffprobe.find(function (s) { return s.codec_type === 'video' })
+            if (v) {
+                if (v.tags && v.tags.BPS) {
+                    var b = parseInt(v.tags.BPS, 10)
+                    if (!isNaN(b) && b > 0) return Math.round(b / 1e6)
+                }
+                if (v.bit_rate) {
+                    var br = parseInt(v.bit_rate, 10)
+                    if (!isNaN(br) && br > 0) return Math.round(br / 1e6)
+                }
+            }
+        }
+        var runtime = item && (item.runtime || item.duration || item.episode_run_time)
+        if (Array.isArray(runtime)) runtime = runtime.length > 0 ? runtime[0] : 0
+        if (!runtime && isSeries) runtime = 45
+        if (size > 0 && runtime > 0) {
+            var mult = 1
+            if (isSeries) {
+                var pr = etParseTorrentTitle(title)
+                if (pr && pr.episodesCount && pr.episodesCount > 1) mult = pr.episodesCount
+                else if (pr && pr.episodesTotal && pr.episodesTotal > 1) mult = pr.episodesTotal
+                else if (seasonCount > 1) {
+                    if (size > (/\b2160p\b|4k\b/i.test(title) ? 32212254720 : 10737418240)) mult = seasonCount
+                }
+            }
+            var seconds = 60 * runtime * mult
+            var rate = Math.round(8 * size / 1e6 / seconds)
+            if (rate > 0) return Math.min(rate, 150)
+        }
+        if (element.bitrate) {
+            var m = String(element.bitrate).match(/(\d+\.?\d*)/)
+            if (m) return Math.round(parseFloat(m[1]))
+        }
+        var m2 = String(title).match(/(\d+\.?\d*)\s*(?:Mbps|Мбит)/i)
+        return m2 ? Math.round(parseFloat(m2[1])) : 0
+    }
+
+    var ET_AUDIO_MAP = {
+        'Дубляж RU': ['дубляж', 'дб', 'd', 'dub'],
+        'Дубляж UKR': ['ukr'],
+        'Дубляж Пифагор': ['пифагор'],
+        'Дубляж Red Head Sound': ['red head sound', 'rhs'],
+        'Дубляж Videofilm': ['videofilm'],
+        'Дубляж MovieDalen': ['moviedalen'],
+        'Дубляж LeDoyen': ['ledoyen'],
+        'Дубляж Whiskey Sound': ['whiskey sound'],
+        'Дубляж IRON VOICE': ['iron voice'],
+        'Дубляж AlexFilm': ['alexfilm'],
+        'Дубляж Amedia': ['amedia'],
+        'MVO HDRezka': ['hdrezka', 'hdrezka studio'],
+        'MVO LostFilm': ['lostfilm'],
+        'MVO TVShows': ['tvshows', 'tv shows'],
+        'MVO Jaskier': ['jaskier'],
+        'MVO RuDub': ['rudub'],
+        'MVO LE-Production': ['le-production'],
+        'MVO Кубик в Кубе': ['кубик в кубе'],
+        'MVO NewStudio': ['newstudio'],
+        'MVO Good People': ['good people'],
+        'MVO IdeaFilm': ['ideafilm'],
+        'MVO AMS': ['ams'],
+        'MVO Baibako': ['baibako'],
+        'MVO Profix Media': ['profix media'],
+        'MVO NewComers': ['newcomers'],
+        'MVO GoLTFilm': ['goltfilm'],
+        'MVO JimmyJ': ['jimmyj'],
+        'MVO Kerob': ['kerob'],
+        'MVO LakeFilms': ['lakefilms'],
+        'MVO Novamedia': ['novamedia'],
+        'MVO Twister': ['twister'],
+        'MVO Voice Project': ['voice project'],
+        'MVO Dragon Money Studio': ['dragon money', 'dms'],
+        'MVO Syncmer': ['syncmer'],
+        'MVO ColdFilm': ['coldfilm'],
+        'MVO SunshineStudio': ['sunshinestudio'],
+        'MVO Ultradox': ['ultradox'],
+        'MVO Octopus': ['octopus'],
+        'MVO OMSKBIRD': ['omskbird records', 'omskbird'],
+        'AVO Володарский': ['володарский'],
+        'AVO Яроцкий': ['яроцкий', 'м. яроцкий'],
+        'AVO Сербин': ['сербин', 'ю. сербин'],
+        'PRO Gears Media': ['gears media'],
+        'PRO Hamsterstudio': ['hamsterstudio', 'hamster'],
+        'PRO P.S.Energy': ['p.s.energy'],
+        'UKR НеЗупиняйПродакшн': ['незупиняйпродакшн'],
+        'Original': ['original']
+    }
+
+    function etAudioMatch(text, key) {
+        var t = String(text || '').toLowerCase()
+        return (ET_AUDIO_MAP[key] || []).some(function (alt) {
+            var a = alt.toLowerCase()
+            if (a.length <= 3) return new RegExp('\\b' + etEscRe(a) + '\\b', 'i').test(t)
+            return t.indexOf(a) >= 0
+        })
+    }
+
+    function etAudioTracks(element, item, isSeries, seasonCount) {
+        var title = (element.Title || element.title || '').toLowerCase()
+        var found = []
+        if (element.ffprobe && Array.isArray(element.ffprobe)) {
+            element.ffprobe.filter(function (s) { return s.codec_type === 'audio' }).forEach(function (st) {
+                var tags = st.tags || {}
+                var tName = (tags.title || tags.handler_name || '').toLowerCase()
+                var lang = (tags.language || '').toLowerCase()
+                var keys = []
+                for (var k in ET_AUDIO_MAP) {
+                    var alts = ET_AUDIO_MAP[k]
+                    if (k === 'Дубляж RU' && (lang === 'rus' || lang === 'russian') &&
+                        (tName.indexOf('dub') >= 0 || tName.indexOf('дубляж') >= 0)) {
+                        keys.push(k)
+                        continue
+                    }
+                    var matched = alts.some(function (alt) {
+                        var a = alt.toLowerCase()
+                        if (a === lang) return true
+                        if (a.length <= 3) return new RegExp('\\b' + etEscRe(a) + '\\b', 'i').test(tName)
+                        return tName.indexOf(a) >= 0
+                    })
+                    if (matched) keys.push(k)
+                }
+                keys.forEach(function (k) { if (found.indexOf(k) < 0) found.push(k) })
+            })
+        }
+        for (var k in ET_AUDIO_MAP) {
+            if (found.indexOf(k) >= 0) continue
+            var matched = ET_AUDIO_MAP[k].some(function (alt) {
+                var a = alt.toLowerCase()
+                if (a.length <= 3) return new RegExp('\\b' + etEscRe(a) + '\\b', 'i').test(title)
+                return title.indexOf(a) >= 0
+            })
+            if (matched) found.push(k)
+        }
+        return found
+    }
+
+    function etFeatures(element, item, isSeries, seasonCount) {
+        return {
+            resolution: etResolution(element),
+            hdr_type: etHdrType(element),
+            audio_tracks: etAudioTracks(element, item, isSeries, seasonCount),
+            bitrate: etBitrate(element, item, isSeries, seasonCount)
+        }
+    }
+
+    function etMakeScorer() {
+        var cfg = etConfig
+        var rules = cfg.scoring_rules
+        return function (el) {
+            var total = 100
+            var feats = el.features
+            var seeds = el.Seeds || el.seeds || el.Seeders || el.seeders || 0
+            var a = { base: 100, resolution: 0, hdr: 0, bitrate: 0, availability: 0, audio: 0, audio_track: 0 }
+            var priority = cfg.parameter_priority || ['resolution', 'hdr', 'bitrate', 'audio_track', 'availability', 'audio_quality']
+
+            var resW = ((rules.weights && rules.weights.resolution) || 100) / 100
+            var resScore = ((rules.resolution && rules.resolution[feats.resolution]) || 0) * resW
+            a.resolution = resScore
+            total += resScore
+
+            var hdrW = ((rules.weights && rules.weights.hdr) || 100) / 100
+            var hdrScore = ((rules.hdr && rules.hdr[feats.hdr_type]) || 0) * hdrW
+            a.hdr = hdrScore
+            total += hdrScore
+
+            var bitW = (((rules.weights && rules.weights.bitrate) || 100 * (rules.bitrate_bonus && rules.bitrate_bonus.weight)) || 55) / 100
+            var bitScore = 0
+            if (feats.bitrate > 0) {
+                var th = rules.bitrate_bonus && rules.bitrate_bonus.thresholds
+                if (th) {
+                    for (var i = 0; i < th.length; i++) {
+                        if (feats.bitrate >= th[i].min && feats.bitrate < th[i].max) {
+                            bitScore = th[i].bonus * bitW
+                            break
+                        }
+                    }
+                }
+            } else {
+                var bi = priority.indexOf('bitrate')
+                bitScore = (bi === 0 ? -50 : bi === 1 ? -30 : -15) * bitW
+            }
+            a.bitrate = bitScore
+            total += bitScore
+
+            var audW = ((rules.weights && rules.weights.audio_track) || 100) / 100
+            var pref = cfg.audio_track_priority || []
+            var tracks = feats.audio_tracks || []
+            var audScore = 0
+            for (var j = 0; j < pref.length; j++) {
+                var key = pref[j]
+                var matched = tracks.some(function (tr) { return etAudioMatch(tr, key) })
+                if (matched) {
+                    audScore = 15 * (pref.length - j) * audW
+                    break
+                }
+            }
+            a.audio_track = audScore
+            total += audScore
+
+            var minSeeds = (cfg.preferences && cfg.preferences.min_seeds) || (rules.availability && rules.availability.min_seeds) || 1
+            var avW = (((rules.weights && rules.weights.availability) || 100 * (rules.availability && rules.availability.weight)) || 70) / 100
+            var avScore = 0
+            if (seeds < minSeeds) {
+                var ai = priority.indexOf('availability')
+                avScore = (ai === 0 ? -80 : ai === 1 ? -40 : -20) * avW
+            } else {
+                avScore = 12 * Math.log10(seeds + 1) * avW
+            }
+            a.availability = avScore
+            total += avScore
+
+            if (priority[0] === 'resolution' && String(cfg.device && cfg.device.type || 'tv_4k').indexOf('4k') >= 0) {
+                if (feats.resolution === 2160 && feats.bitrate > 0) { a.special = 80; total += 80 }
+                else if (feats.resolution === 2160) { a.special = 30; total += 30 }
+                else if (feats.resolution === 1080 && seeds > 50 && feats.bitrate > 0) { a.special = 10; total += 10 }
+            }
+
+            total = Math.max(0, Math.round(total))
+
+            if (setting('et_show_scores', true)) {
+                var ttl = (el.Title || el.title || '').substring(0, 80)
+                console.log('[Score]', ttl, {
+                    total: total,
+                    breakdown: a,
+                    features: { resolution: feats.resolution, hdr_type: feats.hdr_type, bitrate: feats.bitrate, audio_tracks: feats.audio_tracks },
+                    seeds: seeds,
+                    paramPriority: priority.slice(0, 3)
+                })
+            }
+            return { score: total, breakdown: a }
+        }
+    }
+
+    function etProcessResults(data, type) {
+        if (!setting('et_enabled', true)) return
+        if (!data.Results || !Array.isArray(data.Results)) return
+        console.log('[EasyTorrent] Получено от парсера:', data.Results.length, 'торрентов')
+
+        var movie = data.movie || (type && type.movie)
+        var isSeries = !!(movie && (movie.original_name || (movie.number_of_seasons || 0) > 0 || movie.seasons))
+        var seasonCount = 1
+        if (isSeries) {
+            var realMax = 1
+            var planMax = 1
+            data.Results.forEach(function (el) {
+                var pr = etParseTorrentTitle(el.Title || el.title || '')
+                if (pr.episodesCount > realMax) realMax = pr.episodesCount
+                if (pr.episodesTotal > planMax) planMax = pr.episodesTotal
+            })
+            seasonCount = realMax > 1 ? realMax : planMax
+            if (seasonCount > 1) {
+                console.log('[EasyTorrent] Режим сериала. Анализ: Реальный макс=' + realMax + ', План=' + planMax + '. Используем=' + seasonCount)
+            }
+        }
+
+        var scorer = etMakeScorer()
+        var items = data.Results.map(function (el, idx) {
+            var feats = etFeatures(el, movie, isSeries, seasonCount)
+            var res = scorer(Object.assign({}, el, { features: feats }))
+            return { element: el, originalIndex: idx, features: feats, score: res.score, breakdown: res.breakdown }
+        })
+        console.log('[EasyTorrent] Все торренты оценены')
+
+        items.sort(function (a, b) {
+            if (b.score !== a.score) return b.score - a.score
+            if (b.features.bitrate !== a.features.bitrate) return b.features.bitrate - a.features.bitrate
+            var sa = a.element.Seeds || a.element.seeds || a.element.Seeders || a.element.seeders || 0
+            var sb = b.element.Seeds || b.element.seeds || b.element.Seeders || b.element.seeders || 0
+            return sb - sa
+        })
+
+        if (items.length > 0) {
+            console.log('=== ВСЕ ТОРРЕНТЫ (отсортированы по score) ===')
+            items.forEach(function (it, idx) {
+                var n = it.element.Seeds || it.element.seeds || it.element.Seeders || it.element.seeders || 0
+                var r = it.breakdown
+                var title = (it.element.Title || it.element.title || '').substring(0, 100)
+                var parts = []
+                if (typeof r.audio_track !== 'undefined' && r.audio_track !== 0) parts.push('A:' + (r.audio_track > 0 ? '+' : '') + Math.round(r.audio_track))
+                if (typeof r.resolution !== 'undefined' && r.resolution !== 0) parts.push('R:' + (r.resolution > 0 ? '+' : '') + Math.round(r.resolution))
+                if (typeof r.bitrate !== 'undefined' && r.bitrate !== 0) parts.push('B:' + (r.bitrate > 0 ? '+' : '') + Math.round(r.bitrate))
+                if (typeof r.availability !== 'undefined' && r.availability !== 0) parts.push('S:' + (r.availability > 0 ? '+' : '') + Math.round(r.availability))
+                if (typeof r.hdr !== 'undefined' && r.hdr !== 0) parts.push('H:' + (r.hdr > 0 ? '+' : '') + Math.round(r.hdr))
+                if (typeof r.special !== 'undefined' && r.special !== 0) parts.push('SP:' + (r.special > 0 ? '+' : '') + Math.round(r.special))
+                var tag = parts.length > 0 ? '[' + parts.join(' ') + ']' : '[no breakdown]'
+                console.log((idx + 1) + '. [' + it.score + '] ' + (it.features.resolution || '?') + 'p ' +
+                    it.features.hdr_type + ' ' + it.features.bitrate + 'mb Seeds:' + n + ' ' + tag + ' | ' + title)
+            })
+            console.log('=== ВСЕГО: ' + items.length + ' торрентов ===')
+        }
+
+        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
+        var minSeeds = (etConfig.preferences && etConfig.preferences.min_seeds) || 2
+        var candidates = items.filter(function (it) {
+            return (it.element.Seeds || it.element.seeds || it.element.Seeders || it.element.seeders || 0) >= minSeeds
+        })
+        candidates.slice(0, count).forEach(function (it, idx) {
+            it.rank = idx
+            it.isIdeal = idx === 0 && it.score >= 150
+        })
+        items.forEach(function (it) {
+            it.element._recommendScore = it.score
+            it.element._recommendBreakdown = it.breakdown
+            it.element._recommendFeatures = it.features
+        })
+        console.log('[EasyTorrent] Все торренты промаркированы баллами')
+        console.log('[EasyTorrent] Топ-рекомендации сохранены')
+    }
+
+    function etBreakdownChips(breakdown) {
+        if (!breakdown) return null
+        var $chips = $('<div class="torrent-recommend-panel__chips"></div>')
+        var defs = [
+            { key: 'audio_track', name: 'Озвучка' },
+            { key: 'resolution', name: 'Разреш.' },
+            { key: 'bitrate', name: 'Битрейт' },
+            { key: 'availability', name: 'Сиды' },
+            { key: 'hdr', name: 'HDR' },
+            { key: 'special', name: 'Бонус' }
+        ]
+        defs.forEach(function (d) {
+            if (typeof breakdown[d.key] === 'undefined' || breakdown[d.key] === 0) return
+            var v = Math.round(breakdown[d.key])
+            var sign = v > 0 ? '+' : ''
+            var cls = v >= 0 ? 'tr-chip--pos' : 'tr-chip--neg'
+            $chips.append('<div class="tr-chip ' + cls + '">' +
+                '<span class="tr-chip__name">' + d.name + '</span>' +
+                '<span class="tr-chip__val">' + sign + v + '</span>' +
+                '</div>')
+        })
+        return $chips
+    }
+
+    function etRenderPanel(e) {
+        if (!setting('et_enabled', true)) return
+        var element = e.element
+        var item = e.item
+        var showScores = setting('et_show_scores', true)
+        if (typeof element._recommendRank === 'undefined') return
+        item.find('.torrent-recommend-badge').remove()
+        item.find('.torrent-recommend-panel').remove()
+
+        var rank = element._recommendRank
+        var score = element._recommendScore
+        var breakdown = element._recommendBreakdown || {}
+        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
+        if (!(element._recommendIsIdeal || rank < count || showScores)) return
+
+        var features = element._recommendFeatures || {}
+        var meta = []
+        if (features.resolution) meta.push(features.resolution + 'p')
+        if (features.hdr_type) meta.push(ET_HDR_LABEL[features.hdr_type] || String(features.hdr_type).toUpperCase())
+        if (features.bitrate) meta.push(features.bitrate + ' Mbps')
+
+        var variant = 'neutral'
+        var label = 'Оценка'
+        if (element._recommendIsIdeal) {
+            variant = 'ideal'
+            label = ET_STR.ideal
+        } else if (rank < count) {
+            variant = 'recommended'
+            label = ET_STR.recommended + ' • #' + (rank + 1)
+        }
+
+        var $panel = $('<div class="torrent-recommend-panel torrent-recommend-panel--' + variant + '"></div>')
+        var $left = $('<div class="torrent-recommend-panel__left"></div>')
+        $left.append('<div class="torrent-recommend-panel__label">' + label + '</div>')
+        if (meta.length) $left.append('<div class="torrent-recommend-panel__meta">' + meta.join(' • ') + '</div>')
+
+        var $right = $('<div class="torrent-recommend-panel__right"></div>')
+        if (showScores && typeof score !== 'undefined') {
+            $right.append('<div class="torrent-recommend-panel__score">' + score + '</div>')
+        }
+
+        $panel.append($left)
+        if (showScores) {
+            var chips = etBreakdownChips(breakdown)
+            if (chips) $panel.append(chips)
+        }
+        $panel.append($right)
+        item.append($panel)
+    }
+
+    function etPatchParserGet(Parser) {
+        console.log('[EasyTorrent] Патчим Parser.get для перехвата и фиксации топов')
+        var orig = Parser.get
+
+        Parser.get = function (type, callback, params) {
+            return orig.call(this, type, function (data) {
+                if (data && data.Results && Array.isArray(data.Results)) {
+                    etProcessResults(data, type)
+                    var arr = data.Results
+
+                    var reorder = function (list) {
+                        if (!Array.isArray(list) || list.length === 0) return list
+                        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
+                        var minSeeds = (etConfig.preferences && etConfig.preferences.min_seeds) || 0
+                        var rec = [].concat(list).filter(function (el) {
+                            var s = el.Seeds || el.seeds || el.Seeders || el.seeders || 0
+                            return (el._recommendScore || 0) > 0 && s >= minSeeds
+                        }).sort(function (a, b) {
+                            return (b._recommendScore || 0) - (a._recommendScore || 0)
+                        }).slice(0, count)
+                        if (rec.length === 0) {
+                            list.forEach(function (el) { el._recommendRank = 999 })
+                            return list
+                        }
+                        var others = Array.prototype.filter.call(list, function (el) { return rec.indexOf(el) < 0 })
+                        var sorted = [].concat(rec, others)
+                        sorted.forEach(function (el, i) {
+                            el._recommendRank = i
+                            el._recommendIsIdeal = i === 0 && (el._recommendScore || 0) >= 150
+                        })
+                        others.forEach(function (el) { el._recommendRank = 999 })
+                        return sorted
+                    }
+
+                    var wrap = function (list) {
+                        if (!list || list._etPatched) return list
+                        var origSort = list.sort
+                        list.sort = function () {
+                            origSort.apply(this, arguments)
+                            var res = reorder(this)
+                            for (var i = 0; i < res.length; i++) this[i] = res[i]
+                            return this
+                        }
+                        var origFilter = list.filter
+                        list.filter = function () {
+                            var res = origFilter.apply(this, arguments)
+                            return wrap(reorder(res))
+                        }
+                        list._etPatched = true
+                        return list
+                    }
+
+                    arr = wrap(reorder(arr))
+                    try {
+                        Object.defineProperty(data, 'Results', {
+                            get: function () { return arr },
+                            set: function (v) { arr = wrap(reorder(v)) },
+                            configurable: true,
+                            enumerable: true
+                        })
+                        console.log('[EasyTorrent] Умная контекстная фильтрация активирована')
+                    } catch (e) {
+                        console.log('[EasyTorrent] Ошибка при фиксации топов:', e)
+                    }
+                }
+                return callback.apply(this, arguments)
+            }, params)
+        }
+        console.log('[EasyTorrent] Parser.get пропатчен!')
+    }
+
+    function etPatchParser() {
+        var Parser = window.Lampa.Parser || (window.Lampa.Component ? window.Lampa.Component.Parser : null)
+        if (Parser && Parser.get) {
+            etPatchParserGet(Parser)
+        } else {
+            setTimeout(function () { etPatchParser() }, 1000)
+        }
+    }
+
+    /* ------- Продолжить просмотр (resume) ------- */
+
+    var etPlayCtx = null
+    var etHeartbeat = null
+
+    function etResumeKey(movieId) { return 'et_resume_' + movieId }
+
+    function etLoadResume(movieId) {
+        if (!movieId) return null
+        try { return Lampa.Storage.get(etResumeKey(movieId), null) } catch (e) { return null }
+    }
+
+    function etSaveResume(movieId, rec) {
+        if (!movieId || !rec) return
+        try { Lampa.Storage.set(etResumeKey(movieId), rec) } catch (e) {}
+    }
+
+    function etClearResume(movieId) {
+        if (!movieId) return
+        try { Lampa.Storage.remove(etResumeKey(movieId)) } catch (e) {
+            try { Lampa.Storage.set(etResumeKey(movieId), null) } catch (e2) {}
+        }
+    }
+
+    function etPlayerInstance() {
+        try {
+            if (Lampa.Player && Lampa.Player.player) return Lampa.Player.player
+        } catch (e) {}
+        return null
+    }
+
+    function etPlayerPosition() {
+        var p = etPlayerInstance()
+        if (!p) return null
+        try {
+            if (typeof p.time == 'function') {
+                var t = p.time()
+                if (typeof t == 'number') return t
+            }
+            if (typeof p.getPosition == 'function') return p.getPosition()
+            if (typeof p.currentTime == 'function') return p.currentTime()
+            var v = p.video || p.element
+            if (v) {
+                if (typeof v.currentTime == 'number') return v.currentTime
+                if (typeof v.getCurrentTime == 'function') return v.getCurrentTime()
+            }
+        } catch (e) {}
+        return null
+    }
+
+    function etPlayerDuration() {
+        var p = etPlayerInstance()
+        if (!p) return null
+        try {
+            if (typeof p.duration == 'function') {
+                var d = p.duration()
+                if (typeof d == 'number') return d
+            }
+            if (typeof p.getDuration == 'function') return p.getDuration()
+            var v = p.video || p.element
+            if (v && typeof v.duration == 'number') return v.duration
+        } catch (e) {}
+        return null
+    }
+
+    function etSeekTo(seconds) {
+        var p = etPlayerInstance()
+        if (!p) return false
+        try {
+            if (typeof p.setPosition == 'function') { p.setPosition(seconds); return true }
+            if (typeof p.seek == 'function') { p.seek(seconds); return true }
+        } catch (e) {}
+        try {
+            var v = p.video || p.element
+            if (v && typeof v.currentTime == 'number') { v.currentTime = seconds; return true }
+        } catch (e) {}
+        return false
+    }
+
+    function etResumeSeek(position) {
+        var tries = 0
+        var maxTries = 90
+        function tick() {
+            if (tries++ > maxTries) return
+            var pos = etPlayerPosition()
+            var dur = etPlayerDuration()
+            if (dur != null && dur > 0 && pos != null && pos >= position - 3) return
+            if (dur != null && dur > 0) etSeekTo(position)
+            setTimeout(tick, 1500)
+        }
+        setTimeout(tick, 2000)
+    }
+
+    function etFormatTime(sec) {
+        var s = Math.max(0, Math.floor(sec || 0))
+        var h = Math.floor(s / 3600)
+        var m = Math.floor((s % 3600) / 60)
+        var ss = s % 60
+        var mm = m < 10 ? '0' + m : String(m)
+        var sm = ss < 10 ? '0' + ss : String(ss)
+        if (h > 0) return h + ':' + mm + ':' + sm
+        return mm + ':' + sm
+    }
+
+    function etStartParams(e) {
+        var p = null
+        try { p = e && e.data } catch (err) {}
+        if (!p || typeof p != 'object') {
+            try { p = Lampa.Player && Lampa.Player.current } catch (err) {}
+        }
+        if (!p || typeof p != 'object') p = {}
+        return {
+            url: String(p.url || p.torrent || p.stream || ''),
+            title: String(p.title || p.Title || p.name || '')
+        }
+    }
+
+    function etSaveCurrentPosition() {
+        if (!etPlayCtx || !etPlayCtx.movieId || !etPlayCtx.url) return
+        var pos = etPlayerPosition()
+        if (pos == null || pos < 15) return
+        var dur = etPlayerDuration()
+        etSaveResume(etPlayCtx.movieId, {
+            title: etPlayCtx.title || '',
+            url: etPlayCtx.url,
+            position: pos,
+            duration: dur,
+            updated: Date.now()
+        })
+    }
+
+    function etStartHeartbeat() {
+        if (!etHeartbeat) etHeartbeat = setInterval(function () { etSaveCurrentPosition() }, 10000)
+    }
+
+    function etStopHeartbeat() {
+        if (etHeartbeat) {
+            clearInterval(etHeartbeat)
+            etHeartbeat = null
+        }
+    }
+
+    function etResumeOnStart(e) {
+        var wasResume = etPlayCtx && etPlayCtx.resume
+        var sp = etStartParams(e)
+        var movieId = null
+        try {
+            var act = Lampa.Activity.active()
+            if (act && act.card && act.card.id) movieId = act.card.id
+        } catch (err) {}
+        if (!movieId && etPlayCtx) movieId = etPlayCtx.movieId
+        etPlayCtx = {
+            movieId: movieId,
+            url: sp.url || (etPlayCtx && etPlayCtx.url),
+            title: sp.title || (etPlayCtx && etPlayCtx.title),
+            resume: wasResume
+        }
+        etStartHeartbeat()
+        if (!wasResume && movieId && etPlayCtx.url) {
+            var rec = etLoadResume(movieId)
+            if (rec && rec.url === etPlayCtx.url && rec.position > 20) {
+                etResumeSeek(rec.position)
+            }
+        }
+    }
+
+    function etHandleEnded() {
+        etStopHeartbeat()
+        if (!etPlayCtx || !etPlayCtx.movieId) {
+            etPlayCtx = null
+            return
+        }
+        var pos = etPlayerPosition()
+        var dur = etPlayerDuration()
+        var finished = dur != null && dur > 0 && pos != null && pos >= dur - 120
+        if (finished) etClearResume(etPlayCtx.movieId)
+        else etSaveCurrentPosition()
+        etPlayCtx = null
+    }
+
+    function etOnPlayer(e) {
+        try {
+            if (e.type == 'start') { etResumeOnStart(e); return }
+            if (e.type == 'ended') { etHandleEnded(); return }
+            if (e.type == 'stop' || e.type == 'destroy') {
+                etSaveCurrentPosition()
+                etStopHeartbeat()
+                etPlayCtx = null
+                return
+            }
+            if (e.type == 'pause') etSaveCurrentPosition()
+        } catch (err) {}
+    }
+
+    function etResumePlay(movie) {
+        var rec = etLoadResume(movie && movie.id)
+        if (!rec || !rec.url) {
+            try { Lampa.Noty.show('Нет данных о просмотре') } catch (e) {}
+            return
+        }
+        var title = rec.title || (movie && (movie.title || movie.name)) || ''
+        etPlayCtx = { movieId: movie && movie.id, url: rec.url, title: title, resume: true }
+        etStartHeartbeat()
+        try { Lampa.Player.play({ title: title, url: rec.url }) } catch (e) {}
+        etResumeSeek(rec.position)
+    }
+
+    var etResumeDefer = null
+
+    function etMaybeResumeMenu(activity, defer) {
+        try {
+            if (!activity || activity._etResumePassed) return false
+            if (activity.component != 'torrents') return false
+            var movie = activity.movie || activity.card
+            if (!movie || !movie.id) return false
+            if (!setting('et_resume_enabled', true)) return false
+            var rec = etLoadResume(movie.id)
+            if (!rec || !rec.url) return false
+
+            etResumeDefer = defer
+
+            Lampa.Select.show({
+                title: movie.title || movie.name || ET_STR.resume_title,
+                items: [
+                    { title: ET_STR.resume_title + ' (' + etFormatTime(rec.position) + ')', action: 'resume' },
+                    { title: 'Смотреть с начала', action: 'start' }
+                ],
+                onSelect: function (sel) {
+                    if (sel.action == 'resume') {
+                        etResumePlay(movie)
+                    } else {
+                        activity._etResumePassed = true
+                        if (etResumeDefer) etResumeDefer()
+                    }
+                },
+                onBack: function () {}
+            })
+            return true
+        } catch (e) {
+            return false
+        }
+    }
+
+    function etInterceptTorrents() {
+        try {
+            if (typeof Lampa.Activity == 'undefined' || !Lampa.Activity) return
+
+            if (typeof Lampa.Activity.push == 'function' && !Lampa.Activity.push._etWrapped) {
+                var origPush = Lampa.Activity.push
+                Lampa.Activity.push = function (activity) {
+                    var self = this
+                    var args = arguments
+                    var defer = function () { origPush.apply(self, args) }
+                    if (etMaybeResumeMenu(activity, defer)) return
+                    return origPush.apply(self, args)
+                }
+                Lampa.Activity.push._etWrapped = true
+            }
+
+            if (typeof Lampa.Activity.load == 'function' && !Lampa.Activity.load._etWrapped) {
+                var origLoad = Lampa.Activity.load
+                Lampa.Activity.load = function (activity) {
+                    var self = this
+                    var args = arguments
+                    var defer = function () { origLoad.apply(self, args) }
+                    if (etMaybeResumeMenu(activity, defer)) return
+                    return origLoad.apply(self, args)
+                }
+                Lampa.Activity.load._etWrapped = true
+            }
+        } catch (e) {}
+    }
+
+    /* ------- Настройки ------- */
+
+    function etConfigView() {
+        var cfg = etConfig
+        var items = [
+            { title: 'Версия конфига', subtitle: cfg.version, noselect: true },
+            { title: 'Тип устройства', subtitle: String(cfg.device && cfg.device.type || '').toUpperCase(), noselect: true },
+            { title: 'Поддержка HDR', subtitle: ((cfg.device && cfg.device.supported_hdr) || []).join(', ') || 'нет', noselect: true },
+            { title: 'Поддержка звука', subtitle: ((cfg.device && cfg.device.supported_audio) || []).join(', ') || 'стерео', noselect: true },
+            { title: 'Приоритет параметров', subtitle: (cfg.parameter_priority || []).join(' > '), noselect: true },
+            { title: 'Приоритет озвучек', subtitle: (cfg.audio_track_priority || []).length + ' шт. • Нажмите для просмотра', action: 'show_voices' },
+            { title: 'Минимально сидов', subtitle: cfg.preferences && cfg.preferences.min_seeds, noselect: true },
+            { title: 'Число рекомендаций', subtitle: cfg.preferences && cfg.preferences.recommendation_count, noselect: true }
+        ]
+        Lampa.Select.show({
+            title: 'Текущая конфигурация',
+            items: items,
+            onSelect: function (e) {
+                if (e.action === 'show_voices') {
+                    var voices = (etConfig.audio_track_priority || []).map(function (v, i) {
+                        return { title: (i + 1) + '. ' + v, noselect: true }
+                    })
+                    Lampa.Select.show({
+                        title: 'Приоритет озвучек',
+                        items: voices,
+                        onBack: function () { etConfigView() }
+                    })
+                }
+            },
+            onBack: function () {
+                try { Lampa.Controller.toggle('settings') } catch (e) {}
+            }
+        })
+    }
+
+    function etQrCode() {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        var code = ''
+        for (var i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length))
+        return code
+    }
+
+    function etQrPoll(code, callback) {
+        try {
+            var url = ET_QR_API + '/rest/v1/tv_configs?id=eq.' + encodeURIComponent(code) + '&select=data,updated_at'
+            fetch(url, { headers: { apikey: ET_QR_KEY, Authorization: 'Bearer ' + ET_QR_KEY } })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('Fetch failed: ' + r.status)
+                    return r.json()
+                })
+                .then(function (arr) {
+                    callback(arr && arr.length ? arr[0].data : null)
+                })
+                .catch(function (err) {
+                    console.error('[EasyTorrent] Fetch error:', err)
+                    callback(null)
+                })
+        } catch (err) {
+            console.error('[EasyTorrent] Fetch error:', err)
+            callback(null)
+        }
+    }
+
+    function etQrOpen() {
+        var code = etQrCode()
+        var page = ET_QR_PAGE + '?pairCode=' + code
+        var $html = $('<div class="about">' +
+            '<div style="text-align: center; margin-bottom: 20px;">' +
+            '<div id="qrCodeContainer" style="background: white; padding: 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px; height: 20em; width: 20em;"></div>' +
+            '</div>' +
+            '<div class="about__text" style="text-align: center; margin-bottom: 15px;">' +
+            '<strong>Или перейдите вручную:</strong><br>' +
+            '<span style="word-break: break-all;">' + page + '</span>' +
+            '</div>' +
+            '<div class="about__text" style="text-align: center;">' +
+            '<strong>Код сопряжения:</strong>' +
+            '<div style="font-size: 2em; font-weight: bold; letter-spacing: 0.3em; margin: 10px 0; color: #667eea;">' + code + '</div>' +
+            '</div>' +
+            '<div class="about__text" id="qrStatus" style="text-align: center; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; margin-top: 20px;">' +
+            '⏳ Ожидание конфигурации...' +
+            '</div>' +
+            '</div>')
+        var lastGenerated = null
+        var timer = null
+        Lampa.Modal.open({
+            title: 'Настройка приоритетов',
+            html: $html,
+            size: 'medium',
+            onBack: function () {
+                if (timer) { clearInterval(timer); timer = null }
+                Lampa.Modal.close()
+                try { Lampa.Controller.toggle('settings_component') } catch (e) {}
+            }
+        })
+        setTimeout(function () {
+            var el = document.getElementById('qrCodeContainer')
+            if (el && Lampa.Utils && Lampa.Utils.qrcode) {
+                try { Lampa.Utils.qrcode(page, el) } catch (e) {
+                    el.innerHTML = '<p style="color: #f44336;">Ошибка генерации QR-кода</p>'
+                }
+            }
+        }, 100)
+        timer = setInterval(function () {
+            etQrPoll(code, function (cfg) {
+                if (!cfg) return
+                var g = cfg.generated
+                if (g && g === lastGenerated) return
+                lastGenerated = g
+                etSaveConfig(cfg)
+                $('#qrStatus').html('✅ Конфигурация получена и применена!').css('color', '#4CAF50')
+                setTimeout(function () {
+                    if (timer) { clearInterval(timer); timer = null }
+                    Lampa.Modal.close()
+                    Lampa.Noty.show('Конфигурация обновлена!')
+                    try { Lampa.Controller.toggle('settings_component') } catch (e) {}
+                }, 2000)
+            })
+        }, 5000)
+    }
+
+    function etSettingsInit() {
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_about', type: 'static' },
+            field: { name: '<div>' + ET_STR.name + ' ' + ET_STR.version + '</div>' },
+            onRender: function (e) {
+                e.css('opacity', '0.7')
+                e.find('.settings-param__name').css({ 'font-size': '1.2em', 'margin-bottom': '0.3em' })
+                e.append('<div style="font-size: 0.9em; padding: 0 1.2em; line-height: 1.4;">Автор: DarkestClouds<br>Система рекомендаций торрентов на основе качества, HDR и озвучки</div>')
+            }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_enabled', type: 'trigger', default: true },
+            field: { name: ET_STR.title, description: ET_STR.desc }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_show_scores', type: 'trigger', default: true },
+            field: { name: ET_STR.show_scores, description: ET_STR.show_scores_desc }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_resume_enabled', type: 'trigger', default: true },
+            field: { name: ET_STR.resume_title, description: ET_STR.resume_desc }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_config_json', type: 'static', default: JSON.stringify(ET_DEFAULT_CONFIG) },
+            field: { name: ET_STR.config_json, description: ET_STR.config_json_desc },
+            onRender: function (e) {
+                var update = function () {
+                    var cfg = etConfig
+                    var txt = String(cfg.device && cfg.device.type || '').toUpperCase()
+                    if (cfg.parameter_priority && cfg.parameter_priority.length) txt += ' | ' + cfg.parameter_priority[0]
+                    e.find('.settings-param__value').text(txt)
+                }
+                update()
+                e.on('hover:enter', function () {
+                    Lampa.Select.show({
+                        title: ET_STR.config_json,
+                        items: [
+                            { title: ET_STR.config_view, action: 'view' },
+                            { title: ET_STR.config_edit, action: 'edit' },
+                            { title: ET_STR.config_reset, action: 'reset' }
+                        ],
+                        onSelect: function (sel) {
+                            if (sel.action == 'view') {
+                                etConfigView()
+                            } else if (sel.action == 'edit') {
+                                Lampa.Input.edit({
+                                    value: Lampa.Storage.get('et_config_json') || JSON.stringify(ET_DEFAULT_CONFIG),
+                                    free: true
+                                }, function (val) {
+                                    if (val) {
+                                        try {
+                                            JSON.parse(val)
+                                            etSaveConfig(val)
+                                            update()
+                                            Lampa.Noty.show('OK')
+                                        } catch (err) {
+                                            Lampa.Noty.show(ET_STR.config_error)
+                                        }
+                                    }
+                                    Lampa.Controller.toggle('settings')
+                                })
+                            } else if (sel.action == 'reset') {
+                                etSaveConfig(ET_DEFAULT_CONFIG)
+                                update()
+                                Lampa.Noty.show('OK')
+                                Lampa.Controller.toggle('settings')
+                            }
+                        },
+                        onBack: function () { Lampa.Controller.toggle('settings') }
+                    })
+                })
+            }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'et_qr_setup', type: 'static' },
+            field: { name: 'Расставить приоритеты', description: 'Откройте визард на телефоне через QR-код' },
+            onRender: function (e) {
+                e.on('hover:enter', function () { etQrOpen() })
+            }
+        })
+    }
+
+    function etStyleInit() {
+        if ($('#et-style').length) return
+
+        var css = `
+.torrent-recommend-panel{
+    display: flex;
+    align-items: center;
+    gap: 0.9em;
+    margin: 0.8em -1em -1em;
+    padding: 0.75em 1em 0.85em;
+    border-radius: 0 0 0.3em 0.3em;
+    border-top: 1px solid rgba(255,255,255,0.10);
+    background: rgba(0,0,0,0.18);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.torrent-recommend-panel__left{
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.torrent-recommend-panel__label{
+    font-size: 0.95em;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    color: rgba(255,255,255,0.92);
+    line-height: 1.15;
+}
+.torrent-recommend-panel__meta{
+    margin-top: 0.25em;
+    font-size: 0.82em;
+    font-weight: 600;
+    color: rgba(255,255,255,0.58);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.torrent-recommend-panel__right{
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+}
+.torrent-recommend-panel__score{
+    font-size: 1.05em;
+    font-weight: 900;
+    padding: 0.25em 0.55em;
+    border-radius: 0.6em;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.95);
+}
+.torrent-recommend-panel__chips{
+    display: flex;
+    flex: 2 1 auto;
+    gap: 0.45em;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+.torrent-recommend-panel__chips:empty{
+    display: none;
+}
+.tr-chip{
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35em;
+    padding: 0.28em 0.55em;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+.tr-chip__name{
+    font-size: 0.78em;
+    font-weight: 700;
+    color: rgba(255,255,255,0.60);
+}
+.tr-chip__val{
+    font-size: 0.86em;
+    font-weight: 900;
+    color: rgba(255,255,255,0.92);
+}
+.tr-chip--pos{
+    background: rgba(76,175,80,0.10);
+    border-color: rgba(76,175,80,0.22);
+}
+.tr-chip--pos .tr-chip__val{ color: rgba(120,255,170,0.95); }
+.tr-chip--neg{
+    background: rgba(244,67,54,0.10);
+    border-color: rgba(244,67,54,0.22);
+}
+.tr-chip--neg .tr-chip__val{ color: rgba(255,120,120,0.95); }
+.torrent-recommend-panel--ideal{
+    background: linear-gradient(135deg, rgba(255,215,0,0.16) 0%, rgba(255,165,0,0.08) 100%);
+    border-top-color: rgba(255,215,0,0.20);
+}
+.torrent-recommend-panel--ideal .torrent-recommend-panel__label{
+    color: rgba(255,235,140,0.98);
+}
+.torrent-recommend-panel--recommended{
+    background: rgba(76,175,80,0.08);
+    border-top-color: rgba(76,175,80,0.18);
+}
+.torrent-recommend-panel--recommended .torrent-recommend-panel__label{
+    color: rgba(160,255,200,0.92);
+}
+.torrent-recommend-panel{
+    animation: tr-panel-in 0.22s ease-out;
+}
+@keyframes tr-panel-in{
+    from{ opacity: 0; transform: translateY(-3px); }
+    to{ opacity: 1; transform: translateY(0); }
+}
+.torrent-item.focus .torrent-recommend-panel{
+    background: rgba(255,255,255,0.08);
+    border-top-color: rgba(255,255,255,0.16);
+}
+@media (max-width: 520px){
+    .torrent-recommend-panel{
+        gap: 0.7em;
+        padding: 0.65em 0.9em 0.75em;
+    }
+    .torrent-recommend-panel__meta{
+        display: none;
+    }
+}
+`
+        $('<style id="et-style">').html(css).appendTo('head')
+    }
+
+    function etInit() {
+        etLoadConfig()
+        etSettingsInit()
+        etStyleInit()
+        etPatchParser()
+        etInterceptTorrents()
+
+        Lampa.Listener.follow('torrent', function (e) {
+            if (e.type == 'render') etRenderPanel(e)
+        })
+
+        Lampa.Listener.follow('player', etOnPlayer)
+
+        Lampa.Listener.follow('activity', function (e) {
+            if (e.type == 'start' && e.component == 'torrents') console.log('[EasyTorrent] Новая страница торрентов')
+        })
+
+        console.log('[EasyTorrent] Готов к работе!')
+    }
+
     function init() {
         network = new Lampa.Reguest()
         network.timeout(1000 * 20)
@@ -1659,6 +3153,7 @@
         translations()
         settingsInit()
         styleInit()
+        etInit()
 
         Lampa.Listener.follow('full', onFull)
         Lampa.Listener.follow('activity', onActivity)
