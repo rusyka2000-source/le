@@ -2440,6 +2440,7 @@
             return orig.call(this, type, function (data) {
                 if (data && data.Results && Array.isArray(data.Results)) {
                     etProcessResults(data, type)
+                    etInjectResumeButton(type || data)
                     var arr = data.Results
 
                     var reorder = function (list) {
@@ -2715,8 +2716,80 @@
         var title = rec.title || (movie && (movie.title || movie.name)) || ''
         etPlayCtx = { movieId: movie && movie.id, url: rec.url, title: title, resume: true }
         etStartHeartbeat()
-        try { Lampa.Player.play({ title: title, url: rec.url }) } catch (e) {}
+        try {
+            if (Lampa.Torrent && typeof Lampa.Torrent.start == 'function') {
+                Lampa.Torrent.start({ url: rec.url, MagnetUri: rec.url, Link: rec.url, Title: title }, movie || {})
+            } else {
+                Lampa.Player.play({ title: title, url: rec.url })
+            }
+        } catch (e) {}
         etResumeSeek(rec.position)
+    }
+
+    function etCapturePlayed(element, movie) {
+        try {
+            var url = element && (element.MagnetUri || element.Link || element.url || '')
+            var title = element && (element.Title || element.title || '')
+            var movieId = movie && (movie.id || movie.kinopoisk_id)
+            if (!movieId) {
+                try {
+                    var act = Lampa.Activity.active()
+                    if (act && act.card && act.card.id) movieId = act.card.id
+                } catch (e) {}
+            }
+            if (!url && etPlayCtx) url = etPlayCtx.url
+            if (!title && etPlayCtx) title = etPlayCtx.title
+            if (!url || !movieId) return
+            etPlayCtx = { movieId: movieId, url: url, title: title, resume: etPlayCtx && etPlayCtx.resume }
+            etStartHeartbeat()
+        } catch (e) {}
+    }
+
+    function etWrapTorrent() {
+        try {
+            if (typeof Lampa.Torrent == 'undefined' || !Lampa.Torrent) {
+                setTimeout(function () { etWrapTorrent() }, 1000)
+                return
+            }
+            if (typeof Lampa.Torrent.start == 'function' && !Lampa.Torrent.start._etWrapped) {
+                var origStart = Lampa.Torrent.start
+                Lampa.Torrent.start = function (element, movie) {
+                    etCapturePlayed(element, movie)
+                    return origStart.apply(this, arguments)
+                }
+                Lampa.Torrent.start._etWrapped = true
+            }
+            if (typeof Lampa.Torrent.play == 'function' && !Lampa.Torrent.play._etWrapped) {
+                var origPlay = Lampa.Torrent.play
+                Lampa.Torrent.play = function (element, movie) {
+                    etCapturePlayed(element, movie)
+                    return origPlay.apply(this, arguments)
+                }
+                Lampa.Torrent.play._etWrapped = true
+            }
+        } catch (e) {}
+    }
+
+    function etInjectResumeButton(activity) {
+        try {
+            if (!setting('et_resume_enabled', true)) return
+            var movie = activity && (activity.movie || activity.card)
+            if (!movie || !movie.id) return
+            var rec = etLoadResume(movie.id)
+            if (!rec || !rec.url) return
+            var $head = $('.activity--active .explorer__files-head')
+            if (!$head || !$head.length) $head = $('.explorer__files-head').filter(':visible').last()
+            if (!$head || !$head.length) return
+            if ($head.find('.et-resume-torrents').length) return
+            var label = '▶ ' + ET_STR.resume_title
+            if (rec.position) label += ' (' + etFormatTime(rec.position) + ')'
+            var $btn = $('<div class="simple-button selector et-resume-torrents">' + label + '</div>')
+            $btn.on('hover:enter', function () { etResumePlay(movie) })
+            $head.append($btn)
+            try {
+                if (Lampa.Controller && typeof Lampa.Controller.collectionAppend == 'function') Lampa.Controller.collectionAppend($btn)
+            } catch (e2) {}
+        } catch (e) {}
     }
 
     var etResumeDefer = null
@@ -3121,6 +3194,17 @@
         display: none;
     }
 }
+.et-resume-torrents{
+    color: rgba(255,235,140,0.95);
+    background: rgba(255,215,0,0.10);
+    border: 1px solid rgba(255,215,0,0.25);
+    border-radius: 0.5em;
+    font-weight: 700;
+}
+.et-resume-torrents.focus{
+    background: rgba(255,215,0,0.25);
+    color: #fff;
+}
 `
         $('<style id="et-style">').html(css).appendTo('head')
     }
@@ -3131,6 +3215,7 @@
         etStyleInit()
         etPatchParser()
         etInterceptTorrents()
+        etWrapTorrent()
 
         Lampa.Listener.follow('torrent', function (e) {
             if (e.type == 'render') etRenderPanel(e)
