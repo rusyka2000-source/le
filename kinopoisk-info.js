@@ -4997,8 +4997,17 @@ if (data && data.Results && Array.isArray(data.Results)) {
         var best = null
         function consider(res) {
             if (!res) return
-            var n = parseInt(res, 10)
-            if (!n || n <= 0) return
+            var s = String(res).toLowerCase().trim()
+            var n = parseInt(s, 10)
+            if (!n || n <= 0) {
+                // распознавание текстовых маркеров качества
+                if (s.indexOf('4k') === 0 || /^4k/i.test(s)) n = 2160
+                else if (/fullhd|fhd|1080/.test(s)) n = 1080
+                else if (/qhd|1440|2k/.test(s)) n = 1440
+                else if (/hd|720/.test(s)) n = 720
+                else if (/sd|480/.test(s)) n = 480
+                else return
+            }
             if (!best || n > best.res) best = { res: n }
         }
 
@@ -5052,28 +5061,59 @@ if (data && data.Results && Array.isArray(data.Results)) {
     }
 
     function cardifyAttachQualityIcon(render, e) {
-        // Ищем уже написанное качество в деталях карточки
+        var level = cardifyQualityLevel(e)
+        var iconHtml = null
+
+        // строка деталей: длительность, год, качество
+        var $details = render.find('.full-start-new__details, .cardify__details').first()
         var $target = null
-        render.find('.full-start-new__details span, .cardify__details span').each(function () {
-            var $s = $(this)
-            var t = $s.text().trim()
-            if (/4k|2160p|1440p|1080p|720p|\bfhd\b|\bhd\b/i.test(t)) {
-                $target = $s
-                return false
-            }
-        })
-        if (!$target || !$target.length) {
-            // fallback: показываем бейдж качества под заголовком
-            var qHtml = cardifyQualityIcon(e)
-            var $title = render.find('.full-start-new__title')
-            if ($title.length) {
-                $('<div class="cardify-quality"></div>').html(qHtml).insertAfter($title)
-            }
+        var qText = ''
+
+        if ($details.length) {
+            // найдем span с уже написанным качеством
+            $details.find('span').each(function () {
+                var $s = $(this)
+                var t = $s.text().trim()
+                var tl = t.toLowerCase()
+                if (/4k|4к|2160p|2160|1440p|1440|1080p|1080|720p|720|fullhd|full hd|fhd|qhd|\b2k\b|\bhd\b|\bsd\b/i.test(tl)) {
+                    $target = $s
+                    qText = tl
+                    return false
+                }
+            })
+        }
+
+        // уровень качества из найденного текста (важнее данных)
+        function textLevel(t) {
+            if (/4k|4к|2160/.test(t)) return 2160
+            if (/1440|qhd|2k/.test(t)) return 1440
+            if (/1080|fullhd|full hd|fhd/.test(t)) return 1080
+            if (/720|\bhd\b/.test(t)) return 720
+            if (/sd|480/.test(t)) return 480
+            return null
+        }
+        var tLevel = qText ? textLevel(qText) : null
+        if (tLevel && (!level || tLevel > level)) level = tLevel
+        iconHtml = cardifyQualitySvg(level && level >= 2160 ? '4k' : '')
+
+        // если качество-текст найден — вставить SVG inline перед ним
+        if ($target && $target.length) {
+            if (!$target.find('.cardify-quality__icon').length) $target.prepend(iconHtml)
             return
         }
-        if ($target.find('.cardify-quality__icon').length) return
-        // ставим SVG в одну строку перед текстом качества
-        $target.prepend(cardifyQualitySvg(cardifyQualityLevel(e) >= 2160 ? '4k' : ''))
+
+        // если нет span качества — добавить SVG в одну строку деталей (рядом с длительностью)
+        if ($details.length) {
+            if (!$details.find('.cardify-quality__icon').length) $details.prepend(iconHtml)
+            return
+        }
+
+        // крайний fallback: бейдж под заголовком
+        var $title = render.find('.full-start-new__title')
+        if ($title.length) {
+            var qHtml = cardifyQualityIcon(e)
+            $('<div class="cardify-quality"></div>').html(qHtml).insertAfter($title)
+        }
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
