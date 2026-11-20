@@ -4991,28 +4991,20 @@ if (data && data.Results && Array.isArray(data.Results)) {
     function cardifyLoadQuality() {
         if (cardifyQualityLoaded) return
         cardifyQualityLoaded = true
-        try {
-            var xhr = new XMLHttpRequest()
-            xhr.open('GET', cardifyQualityApi, true)
-            xhr.timeout = 10000
-            xhr.onload = function () {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                        var json = JSON.parse(xhr.responseText)
-                        var results = json && json.results
-                        var map = {}
-                        if (Array.isArray(results)) {
-                            results.forEach(function (it) {
-                                if (it && it.id) map[it.id] = it
-                            })
-                        }
-                        cardifyQualityCache = { data: results, map: map }
-                    } catch (e) {}
+        if (!network) return
+        network.silent(cardifyQualityApi, function (json) {
+            try {
+                if (typeof json == 'string') json = JSON.parse(json)
+                var results = json && json.results
+                var map = {}
+                if (Array.isArray(results)) {
+                    results.forEach(function (it) {
+                        if (it && it.id) map[it.id] = it
+                    })
                 }
-            }
-            xhr.onerror = xhr.ontimeout = function () {}
-            xhr.send()
-        } catch (e) {}
+                cardifyQualityCache = { data: results, map: map }
+            } catch (e) {}
+        }, function () {}, false, { timeout: 1000 * 10 })
     }
 
     function cardifyQualityQu(id) {
@@ -5031,7 +5023,8 @@ if (data && data.Results && Array.isArray(data.Results)) {
         var qu = cardifyQualityQu(id)
         if (!qu) return
 
-        var $details = render.find('.full-start-new__details, .cardify__details').first()
+        var $details = render.find('.full-start-new__details').first()
+        if (!$details.length) $details = render.find('.cardify__details').first()
         if (!$details.length) return
         if ($details.find('.card--quality').length) return
 
@@ -5064,10 +5057,10 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
         // Иконка качества (из API качества) в конце строки длительности/качества
         cardifyAttachQuality(render, e)
-        // повторно после загрузки данных качества
-        setTimeout(function () {
-            cardifyAttachQuality(render, e)
-        }, 900)
+        // повторно после загрузки данных качества (API может отвечать с задержкой)
+        setTimeout(function () { cardifyAttachQuality(render, e) }, 900)
+        setTimeout(function () { cardifyAttachQuality(render, e) }, 2000)
+        setTimeout(function () { cardifyAttachQuality(render, e) }, 4000)
 
         // Убираем лишний разделитель серий в деталях
         var details = render.find('.full-start-new__details')
