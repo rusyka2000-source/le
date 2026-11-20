@@ -4203,14 +4203,19 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify{-webkit-transition:all .3s;-o-transition:all .3s;-moz-transition:all .3s;transition:all .3s}' +
             '.cardify .full-start-new__body{height:80vh}' +
             '.cardify .full-start-new__right{display:-webkit-box;display:-webkit-flex;display:-moz-box;display:-ms-flexbox;display:flex;-webkit-box-align:end;-webkit-align-items:flex-end;-moz-box-align:end;-ms-flex-align:end;align-items:flex-end}' +
-            '.cardify .full-start-new__title{text-shadow:0 0 .1em rgba(0,0,0,0.3)}' +
+            '.cardify .full-start-new__title{text-shadow:0 0 .1em rgba(0,0,0,0.3);text-shadow:1px 2px 6px rgba(0,0,0,0.8)}' +
             '.cardify__left{-webkit-box-flex:1;-webkit-flex-grow:1;-moz-box-flex:1;-ms-flex-positive:1;flex-grow:1}' +
             '.cardify__right-box{display:-webkit-box;display:-webkit-flex;display:-moz-box;display:-ms-flexbox;display:flex;-webkit-box-direction:vertical;-webkit-box-orient:vertical;-webkit-flex-direction:column;-ms-flex-direction:column;flex-direction:column;-webkit-box-align:center;-webkit-align-items:center;-moz-box-align:center;-ms-flex-align:center;align-items:center;-webkit-flex-shrink:0;-ms-flex-negative:0;flex-shrink:0;position:relative}' +
             '.cardify__details{display:-webkit-box;display:-webkit-flex;display:-moz-box;display:-ms-flexbox;display:flex}' +
-            '.cardify .full-start-new__rate-line.rate-fix{margin: 1em 0 1.7em 0}' +
-            '.full-start-new__details{margin:0 0 1.4em -0.3em;}' +
+            '.cardify .full-start-new__rate-line.rate-fix{margin:0.4em 0 0.5em 0}' +
+            '.full-start-new__details{margin:0 0 0.5em -0.3em;}' +
             '.full-start-new__rate-line{margin:0;margin-left:3.5em}' +
             '.cardify .full-start-new__rate-line>*:last-child{margin-right:0 !important}' +
+            '.cardify .full-start-new__reactions{text-shadow:1px 1px 3px rgba(0,0,0,0.9);margin:0 0 0.4em 0}' +
+            '.cardify .full-start__rate, .cardify .full-start__status, .cardify .full-start__pg{text-shadow:1px 1px 4px rgba(0,0,0,0.95);-webkit-backdrop-filter:blur(1px)}' +
+            '.cardify-quality{display:inline-flex;align-items:center;gap:0.5em;margin:0 0 0.5em 0;padding:0.3em 0.7em;border-radius:0.5em;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.18);box-shadow:1px 1px 4px rgba(0,0,0,0.9)}' +
+            '.cardify-quality__badge{display:inline-flex;align-items:center;gap:0.35em;font-size:1.05em;font-weight:700;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
+            '.cardify-quality__badge svg{width:1.3em;height:1.3em;flex:0 0 auto}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -4260,6 +4265,8 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '                    <div class="full-start-new__head"></div>' +
             '                    <div class="full-start-new__title">{title}</div>' +
             '' +
+            '                    <div class="cardify-quality"></div>' +
+            '' +
             '                    <div class="full-start-new__rate-line rate-fix">' +
             '                        <div class="full-start__rate rate--tmdb"><div>{rating}</div><div class="source--name">TMDB</div></div>' +
             '                        <div class="full-start__rate rate--imdb hide"><div></div><div>IMDB</div></div>' +
@@ -4294,9 +4301,10 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '                        </div>' +
             '' +
             '                        <div class="full-start__button selector button--reaction">' +
-            '                            <svg width="38" height="34" viewBox="0 0 38 34" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-            '                                <path d="M37.208 10.9742C37.1364 10.8013 37.0314 10.6441 36.899 10.5117C36.7666 10.3794 36.6095 10.2744 36.4365 10.2028L12.0658 0.108375C11.7166 -0.0361828 11.3242 -0.0361227 10.9749 0.108542C10.6257 0.253206 10.3482 0.530634 10.2034 0.879836L0.108666 25.2507C0.0369593 25.4236 3.37953e-05 25.609 2.3187e-08 25.7962C-3.37489e-05 25.9834 0.0368249 26.1688 0.108469 26.3418C0.180114 26.5147 0.28514 26.6719 0.417545 26.8042C0.54995 26.9366 0.707139 27.0416 0.880127 27.1131L17.2452 33.8917C17.5945 34.0361 17.9869 34.0361 18.3362 33.8917L29.6574 29.2017C29.8304 29.1301 29.9875 29.0251 30.1199 28.8928C30.2523 28.7604 30.3573 28.6032 30.4289 28.4303L37.2078 12.065C37.2795 11.8921 37.3164 11.7068 37.3164 11.5196C37.3165 11.3325 37.2796 11.1471 37.208 10.9742ZM20.425 29.9407L21.8784 26.4316L25.3873 27.885L20.425 29.9407ZM28.3407 26.0222L21.6524 23.252C21.3031 23.1075 20.9107 23.1076 20.5615 23.2523C20.2123 23.3969 19.9348 23.6743 19.79 24.0235L17.0194 30.7123L3.28783 25.0247L12.2918 3.28773L34.0286 12.2912L28.3407 26.0222Z" fill="currentColor"/>' +
-            '                                <path d="M25.3493 16.976L24.258 14.3423L16.959 17.3666L15.7196 14.375L13.0859 15.4659L15.4161 21.0916L25.3493 16.976Z" fill="currentColor"/>' +
+            '                            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+            '                                <circle cx="6" cy="10" r="3.4" fill="currentColor" opacity="0.9"/>' +
+            '                                <circle cx="18" cy="10" r="3.4" fill="currentColor" opacity="0.55"/>' +
+            '                                <circle cx="12" cy="18" r="3.4" fill="currentColor" opacity="0.7"/>' +
             '                            </svg>' +
             '' +
             '                            <span>#{title_reactions}</span>' +
@@ -4981,6 +4989,46 @@ if (data && data.Results && Array.isArray(data.Results)) {
         }
     }
 
+    function cardifyQualityIcon(e) {
+        var card = (e.object && e.object.card) || e.data
+        if (!card) return ''
+
+        var best = null
+        function consider(res, label) {
+            var n = parseInt(res, 10)
+            if (!n || n <= 0) return
+            if (!best || n > best.res) best = { res: n, label: label || (n + 'p') }
+        }
+
+        // из стандартных полей карточки / источника
+        if (Array.isArray(card.resolutions)) {
+            card.resolutions.forEach(function (r) { consider(r) })
+        } else if (Array.isArray(card.qualities)) {
+            card.qualities.forEach(function (q) { consider(String(q)) })
+        }
+        if (card.quality) consider(card.quality)
+        if (card.video_quality) consider(card.video_quality)
+
+        if (!best) return ''
+
+        var label = best.label
+        var code = ''
+        if (best.res >= 2160) { code = '4k'; label = '4K' }
+        else if (best.res >= 1440) { label = 'QHD' }
+        else if (best.res >= 1080) { label = 'Full HD' }
+        else if (best.res >= 720) { label = 'HD' }
+        else { label = 'SD' }
+
+        return '<span class="cardify-quality__badge">' + qualitySvg(code) + '<span>' + label + '</span></span>'
+    }
+
+    function qualitySvg(code) {
+        if (code === '4k') {
+            return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
+        }
+        return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
+    }
+
     /* ----- Обработчик стартового экрана (полный) ----- */
 
     function cardifySkodf(e) {
@@ -4999,6 +5047,17 @@ if (data && data.Results && Array.isArray(data.Results)) {
             var rateLine = render.find('.cardify__left .rate-fix')
             if (rateLine.length) {
                 rateLine.insertBefore(render.find('.cardify__right-box .full-start-new__rate-line'))
+            }
+        }
+
+        // Бейдж качества в карточке
+        var $quality = render.find('.cardify-quality')
+        if ($quality.length) {
+            var qHtml = cardifyQualityIcon(e)
+            if (qHtml) {
+                $quality.html(qHtml).removeClass('hide')
+            } else {
+                $quality.remove()
             }
         }
 
