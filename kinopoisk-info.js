@@ -4216,6 +4216,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify-quality{display:inline-flex;align-items:center;gap:0.5em;margin:0 0 0.5em 0;padding:0.3em 0.7em;border-radius:0.5em;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.18);box-shadow:1px 1px 4px rgba(0,0,0,0.9)}' +
             '.cardify-quality__badge{display:inline-flex;align-items:center;gap:0.35em;font-size:1.05em;font-weight:700;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
             '.cardify-quality__badge svg{width:1.3em;height:1.3em;flex:0 0 auto}' +
+            '.cardify-quality__icon{width:1.25em;height:1.25em;margin-right:0.35em;display:inline-block;vertical-align:middle;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -4264,8 +4265,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '                <div class="cardify__left">' +
             '                    <div class="full-start-new__head"></div>' +
             '                    <div class="full-start-new__title">{title}</div>' +
-            '' +
-            '                    <div class="cardify-quality"></div>' +
             '' +
             '                    <div class="full-start-new__rate-line rate-fix">' +
             '                        <div class="full-start__rate rate--tmdb"><div>{rating}</div><div class="source--name">TMDB</div></div>' +
@@ -4989,7 +4988,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
         }
     }
 
-    function cardifyQualityIcon(e) {
+    function cardifyQualityLevel(e) {
         var card = (e.object && e.object.card) || null
         var data = e.data || {}
         var movie = data.movie || null
@@ -5003,7 +5002,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
             if (!best || n > best.res) best = { res: n }
         }
 
-        // ищем качество в разных источниках (карточка, фильм, сериал)
         ;[card, movie, tv].forEach(function (src) {
             if (!src) return
             if (Array.isArray(src.resolutions)) src.resolutions.forEach(function (r) { consider(String(r)) })
@@ -5017,38 +5015,65 @@ if (data && data.Results && Array.isArray(data.Results)) {
             }
         })
 
-        // качество из настройки/плеера Lampa (выбор пользователя)
         if (!best) {
             try { consider(Lampa.Storage.field('quality')) } catch (e2) {}
             try { consider(Lampa.Storage.field('video_quality')) } catch (e3) {}
         }
 
-        // fallback: если ничего не найдено, показываем нейтральный бейдж
+        return best ? best.res : null
+    }
+
+    function cardifyQualitySvg(code) {
+        if (code === '4k') {
+            return '<svg class="cardify-quality__icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
+        }
+        return '<svg class="cardify-quality__icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
+    }
+
+    function cardifyQualityIcon(e) {
+        var res = cardifyQualityLevel(e)
         var label, code
-        if (!best) {
+        if (res === null) {
             label = 'HD'
             code = ''
-        } else if (best.res >= 2160) {
+        } else if (res >= 2160) {
             code = '4k'
             label = '4K'
-        } else if (best.res >= 1440) {
+        } else if (res >= 1440) {
             label = 'QHD'
-        } else if (best.res >= 1080) {
+        } else if (res >= 1080) {
             label = 'Full HD'
-        } else if (best.res >= 720) {
+        } else if (res >= 720) {
             label = 'HD'
         } else {
             label = 'SD'
         }
-
-        return '<span class="cardify-quality__badge">' + qualitySvg(code) + '<span>' + label + '</span></span>'
+        return '<span class="cardify-quality__badge">' + cardifyQualitySvg(code) + '<span>' + label + '</span></span>'
     }
 
-    function qualitySvg(code) {
-        if (code === '4k') {
-            return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
+    function cardifyAttachQualityIcon(render, e) {
+        // Ищем уже написанное качество в деталях карточки
+        var $target = null
+        render.find('.full-start-new__details span, .cardify__details span').each(function () {
+            var $s = $(this)
+            var t = $s.text().trim()
+            if (/4k|2160p|1440p|1080p|720p|\bfhd\b|\bhd\b/i.test(t)) {
+                $target = $s
+                return false
+            }
+        })
+        if (!$target || !$target.length) {
+            // fallback: показываем бейдж качества под заголовком
+            var qHtml = cardifyQualityIcon(e)
+            var $title = render.find('.full-start-new__title')
+            if ($title.length) {
+                $('<div class="cardify-quality"></div>').html(qHtml).insertAfter($title)
+            }
+            return
         }
-        return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
+        if ($target.find('.cardify-quality__icon').length) return
+        // ставим SVG в одну строку перед текстом качества
+        $target.prepend(cardifyQualitySvg(cardifyQualityLevel(e) >= 2160 ? '4k' : ''))
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
@@ -5072,20 +5097,8 @@ if (data && data.Results && Array.isArray(data.Results)) {
             }
         }
 
-        // Бейдж качества в карточке
-        var qHtml = cardifyQualityIcon(e)
-        var $quality = render.find('.cardify-quality')
-        if (!$quality.length) {
-            // fallback: если шаблон не переопределился, вставляем бейдж под заголовком
-            var $title = render.find('.full-start-new__title')
-            if ($title.length) {
-                $quality = $('<div class="cardify-quality"></div>')
-                $title.after($quality)
-            }
-        }
-        if ($quality && $quality.length) {
-            $quality.html(qHtml).removeClass('hide')
-        }
+        // Иконка качества рядом с уже написанным качеством в карточке
+        cardifyAttachQualityIcon(render, e)
 
         // Убираем лишний разделитель серий в деталях
         var details = render.find('.full-start-new__details')
