@@ -4990,34 +4990,56 @@ if (data && data.Results && Array.isArray(data.Results)) {
     }
 
     function cardifyQualityIcon(e) {
-        var card = (e.object && e.object.card) || e.data
-        if (!card) return ''
+        var card = (e.object && e.object.card) || null
+        var data = e.data || {}
+        var movie = data.movie || null
+        var tv = data.tv || null
 
         var best = null
-        function consider(res, label) {
+        function consider(res) {
+            if (!res) return
             var n = parseInt(res, 10)
             if (!n || n <= 0) return
-            if (!best || n > best.res) best = { res: n, label: label || (n + 'p') }
+            if (!best || n > best.res) best = { res: n }
         }
 
-        // из стандартных полей карточки / источника
-        if (Array.isArray(card.resolutions)) {
-            card.resolutions.forEach(function (r) { consider(r) })
-        } else if (Array.isArray(card.qualities)) {
-            card.qualities.forEach(function (q) { consider(String(q)) })
+        // ищем качество в разных источниках (карточка, фильм, сериал)
+        ;[card, movie, tv].forEach(function (src) {
+            if (!src) return
+            if (Array.isArray(src.resolutions)) src.resolutions.forEach(function (r) { consider(String(r)) })
+            if (Array.isArray(src.qualities)) src.qualities.forEach(function (q) { consider(String(q)) })
+            consider(src.quality)
+            consider(src.video_quality)
+            consider(src.resolution)
+            if (src.item) {
+                consider(src.item.quality)
+                consider(src.item.resolution)
+            }
+        })
+
+        // качество из настройки/плеера Lampa (выбор пользователя)
+        if (!best) {
+            try { consider(Lampa.Storage.field('quality')) } catch (e2) {}
+            try { consider(Lampa.Storage.field('video_quality')) } catch (e3) {}
         }
-        if (card.quality) consider(card.quality)
-        if (card.video_quality) consider(card.video_quality)
 
-        if (!best) return ''
-
-        var label = best.label
-        var code = ''
-        if (best.res >= 2160) { code = '4k'; label = '4K' }
-        else if (best.res >= 1440) { label = 'QHD' }
-        else if (best.res >= 1080) { label = 'Full HD' }
-        else if (best.res >= 720) { label = 'HD' }
-        else { label = 'SD' }
+        // fallback: если ничего не найдено, показываем нейтральный бейдж
+        var label, code
+        if (!best) {
+            label = 'HD'
+            code = ''
+        } else if (best.res >= 2160) {
+            code = '4k'
+            label = '4K'
+        } else if (best.res >= 1440) {
+            label = 'QHD'
+        } else if (best.res >= 1080) {
+            label = 'Full HD'
+        } else if (best.res >= 720) {
+            label = 'HD'
+        } else {
+            label = 'SD'
+        }
 
         return '<span class="cardify-quality__badge">' + qualitySvg(code) + '<span>' + label + '</span></span>'
     }
@@ -5051,14 +5073,18 @@ if (data && data.Results && Array.isArray(data.Results)) {
         }
 
         // Бейдж качества в карточке
+        var qHtml = cardifyQualityIcon(e)
         var $quality = render.find('.cardify-quality')
-        if ($quality.length) {
-            var qHtml = cardifyQualityIcon(e)
-            if (qHtml) {
-                $quality.html(qHtml).removeClass('hide')
-            } else {
-                $quality.remove()
+        if (!$quality.length) {
+            // fallback: если шаблон не переопределился, вставляем бейдж под заголовком
+            var $title = render.find('.full-start-new__title')
+            if ($title.length) {
+                $quality = $('<div class="cardify-quality"></div>')
+                $title.after($quality)
             }
+        }
+        if ($quality && $quality.length) {
+            $quality.html(qHtml).removeClass('hide')
         }
 
         // Убираем лишний разделитель серий в деталях
