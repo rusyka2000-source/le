@@ -4464,10 +4464,10 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
         Lampa.SettingsApi.addParam({
             component: 'cardify',
-            param: { name: 'cardify_move_text', type: 'trigger', default: true },
+            param: { name: 'cardify_move_text', type: 'trigger', default: false },
             field: {
-                name: 'Перенос описания',
-                description: 'Компактный вид: переносит описание в правый верхний угол (для широких экранов)'
+                name: 'Перенос описания в угол',
+                description: 'По умолчанию описание остаётся в карточке под кнопками. Включите, чтобы перенести его в правый верхний угол'
             }
         })
 
