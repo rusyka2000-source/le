@@ -4213,6 +4213,8 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify .full-start-new__rate-line>*:last-child{margin-right:0 !important}' +
             '.cardify .full-start-new__reactions{text-shadow:1px 1px 3px rgba(0,0,0,0.9);margin:0 0 0.4em 0}' +
             '.cardify .full-start__rate, .cardify .full-start__status, .cardify .full-start__pg{text-shadow:1px 1px 4px rgba(0,0,0,0.95);-webkit-backdrop-filter:blur(1px)}' +
+            '.card--quality{display:inline-flex;align-items:center;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
+            '.card--quality__icon{width:1.2em;height:1.2em;display:inline-block;vertical-align:middle;margin-right:0.35em;color:#ffe216;flex:0 0 auto}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -5029,9 +5031,17 @@ if (data && data.Results && Array.isArray(data.Results)) {
         if ($details.find('.card--quality').length) return
 
         var badge = '<span class="full-start-new__split">●</span>' +
-            '<div class="card--quality"><img src="./img/icons/menu/quality.svg" style="width:16px;height:16px;margin-right:4px;vertical-align:middle;"/>' +
+            '<div class="card--quality">' + cardifyQualitySvg(qu) +
             '<div>' + qu + '</div></div>'
         $details.append(badge)
+    }
+
+    function cardifyQualitySvg(qu) {
+        var s = String(qu || '').toLowerCase()
+        if (s.indexOf('4k') === 0 || /4k|2160/.test(s)) {
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
+        }
+        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
