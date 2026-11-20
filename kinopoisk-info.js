@@ -4207,7 +4207,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify__left{-webkit-box-flex:1;-webkit-flex-grow:1;-moz-box-flex:1;-ms-flex-positive:1;flex-grow:1}' +
             '.cardify__right-box{display:-webkit-box;display:-webkit-flex;display:-moz-box;display:-ms-flexbox;display:flex;-webkit-box-align:center;-webkit-align-items:center;-moz-box-align:center;-ms-flex-align:center;align-items:center;-webkit-flex-shrink:0;-ms-flex-negative:0;flex-shrink:0;position:relative}' +
             '.cardify__details{display:-webkit-box;display:-webkit-flex;display:-moz-box;display:-ms-flexbox;display:flex}' +
-            '.cardify .full-start-new__reactions, .cardify .reaction__count {display:none !important}' +
             '.cardify .full-start-new__rate-line.rate-fix{margin: 1em 0 1.7em 0}' +
             '.full-start-new__details{margin:0 0 1.4em -0.3em;}' +
             '.full-start-new__rate-line{margin:0;margin-left:3.5em}' +
@@ -4319,13 +4318,13 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '                </div>' +
             '' +
             '                <div class="cardify__right-box">' +
-            '                    <div class="full-start-new__reactions selector">' +
-            '                        <div>#{reactions_none}</div>' +
-            '                    </div>' +
-            '' +
             '                    <div class="full-start-new__rate-line">' +
             '                        <div class="full-start__pg hide"></div>' +
             '                        <div class="full-start__status hide"></div>' +
+            '                    </div>' +
+            '' +
+            '                    <div class="full-start-new__reactions selector">' +
+            '                        <div>#{reactions_none}</div>' +
             '                    </div>' +
             '                </div>' +
             '            </div>' +
