@@ -4213,10 +4213,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify .full-start-new__rate-line>*:last-child{margin-right:0 !important}' +
             '.cardify .full-start-new__reactions{text-shadow:1px 1px 3px rgba(0,0,0,0.9);margin:0 0 0.4em 0}' +
             '.cardify .full-start__rate, .cardify .full-start__status, .cardify .full-start__pg{text-shadow:1px 1px 4px rgba(0,0,0,0.95);-webkit-backdrop-filter:blur(1px)}' +
-            '.cardify-quality{display:inline-flex;align-items:center;gap:0.5em;margin:0 0 0.5em 0;padding:0.3em 0.7em;border-radius:0.5em;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.18);box-shadow:1px 1px 4px rgba(0,0,0,0.9)}' +
-            '.cardify-quality__badge{display:inline-flex;align-items:center;gap:0.35em;font-size:1.05em;font-weight:700;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
-            '.cardify-quality__badge svg{width:1.3em;height:1.3em;flex:0 0 auto}' +
-            '.cardify-quality__icon{width:1.25em;height:1.25em;margin-left:0.35em;display:inline-block;vertical-align:middle;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -4988,117 +4984,61 @@ if (data && data.Results && Array.isArray(data.Results)) {
         }
     }
 
-    function cardifyQualityLevel(e) {
-        var card = (e.object && e.object.card) || null
-        var data = e.data || {}
-        var movie = data.movie || null
-        var tv = data.tv || null
+    var cardifyQualityApi = 'http://94.156.115.58:835/quality'
+    var cardifyQualityCache = null
+    var cardifyQualityLoaded = false
 
-        var best = null
-        function consider(res) {
-            if (!res) return
-            var s = String(res).toLowerCase().trim()
-            var n = parseInt(s, 10)
-            if (!n || n <= 0) {
-                // распознавание текстовых маркеров качества
-                if (s.indexOf('4k') === 0 || /^4k/i.test(s)) n = 2160
-                else if (/fullhd|fhd|1080/.test(s)) n = 1080
-                else if (/qhd|1440|2k/.test(s)) n = 1440
-                else if (/hd|720/.test(s)) n = 720
-                else if (/sd|480/.test(s)) n = 480
-                else return
+    function cardifyLoadQuality() {
+        if (cardifyQualityLoaded) return
+        cardifyQualityLoaded = true
+        try {
+            var xhr = new XMLHttpRequest()
+            xhr.open('GET', cardifyQualityApi, true)
+            xhr.timeout = 10000
+            xhr.onload = function () {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        var json = JSON.parse(xhr.responseText)
+                        var results = json && json.results
+                        var map = {}
+                        if (Array.isArray(results)) {
+                            results.forEach(function (it) {
+                                if (it && it.id) map[it.id] = it
+                            })
+                        }
+                        cardifyQualityCache = { data: results, map: map }
+                    } catch (e) {}
+                }
             }
-            if (!best || n > best.res) best = { res: n }
-        }
-
-        ;[card, movie, tv].forEach(function (src) {
-            if (!src) return
-            if (Array.isArray(src.resolutions)) src.resolutions.forEach(function (r) { consider(String(r)) })
-            if (Array.isArray(src.qualities)) src.qualities.forEach(function (q) { consider(String(q)) })
-            consider(src.quality)
-            consider(src.video_quality)
-            consider(src.resolution)
-            if (src.item) {
-                consider(src.item.quality)
-                consider(src.item.resolution)
-            }
-        })
-
-        return best ? best.res : null
+            xhr.onerror = xhr.ontimeout = function () {}
+            xhr.send()
+        } catch (e) {}
     }
 
-    function cardifyQualitySvg(code) {
-        if (code === '4k') {
-            return '<svg class="cardify-quality__icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
-        }
-        return '<svg class="cardify-quality__icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
+    function cardifyQualityQu(id) {
+        if (!id || !cardifyQualityCache || !cardifyQualityCache.map) return null
+        var item = cardifyQualityCache.map[id]
+        return item && item.qu ? item.qu : null
     }
 
-    function cardifyQualityIcon(e) {
-        var res = cardifyQualityLevel(e)
-        var label, code
-        if (res === null) {
-            label = 'HD'
-            code = ''
-        } else if (res >= 2160) {
-            code = '4k'
-            label = '4K'
-        } else if (res >= 1440) {
-            label = 'QHD'
-        } else if (res >= 1080) {
-            label = 'Full HD'
-        } else if (res >= 720) {
-            label = 'HD'
-        } else {
-            label = 'SD'
-        }
-        return '<span class="cardify-quality__badge">' + cardifyQualitySvg(code) + '<span>' + label + '</span></span>'
-    }
+    function cardifyAttachQuality(render, e) {
+        var id = null
+        if (e.data && e.data.movie && e.data.movie.id) id = e.data.movie.id
+        else if (e.data && e.data.tv && e.data.tv.id) id = e.data.tv.id
+        else if (e.object && e.object.card && e.object.card.id) id = e.object.card.id
+        if (!id) return
 
-    function cardifyAttachQualityIcon(render, e) {
-        var level = cardifyQualityLevel(e)
+        var qu = cardifyQualityQu(id)
+        if (!qu) return
 
-        function textLevel(t) {
-            if (/4k|4к|2160/.test(t)) return 2160
-            if (/1440|qhd|2k/.test(t)) return 1440
-            if (/1080|fullhd|full hd|fhd/.test(t)) return 1080
-            if (/720|\bhd\b/.test(t)) return 720
-            if (/sd|480/.test(t)) return 480
-            return null
-        }
-
-        // строка деталей: длительность, год, качество
         var $details = render.find('.full-start-new__details, .cardify__details').first()
+        if (!$details.length) return
+        if ($details.find('.card--quality').length) return
 
-        // определяем уровень качества из текста деталей, а если там нет —
-        // из текста других элементов карточки (заголовок, рейтинги, кнопки)
-        var tLevel = null
-        if ($details.length) {
-            tLevel = textLevel($details.text())
-        }
-        if (!tLevel) {
-            var probe = render.find('.full-start-new__title, .full-start-new__rate-line, .full-start__button, .full-start-new__head')
-            probe.each(function () {
-                var tl = textLevel($(this).text())
-                if (tl) { tLevel = tl; return false }
-            })
-        }
-        if (tLevel && (!level || tLevel > level)) level = tLevel
-
-        var iconHtml = cardifyQualitySvg(level && level >= 2160 ? '4k' : '')
-
-        // добавляем SVG в конце строки деталей
-        if ($details.length) {
-            if (!$details.find('.cardify-quality__icon').length) $details.append(iconHtml)
-            return
-        }
-
-        // fallback: бейдж под заголовком
-        var $title = render.find('.full-start-new__title')
-        if ($title.length) {
-            var qHtml = cardifyQualityIcon(e)
-            $('<div class="cardify-quality"></div>').html(qHtml).insertAfter($title)
-        }
+        var badge = '<span class="full-start-new__split">●</span>' +
+            '<div class="card--quality"><img src="./img/icons/menu/quality.svg" style="width:16px;height:16px;margin-right:4px;vertical-align:middle;"/>' +
+            '<div>' + qu + '</div></div>'
+        $details.append(badge)
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
@@ -5122,12 +5062,12 @@ if (data && data.Results && Array.isArray(data.Results)) {
             }
         }
 
-        // Иконка качества в конце строки длительности/качества
-        cardifyAttachQualityIcon(render, e)
-        // повторно после заполнения деталей (когда Lampa напишет длительность/качество)
+        // Иконка качества (из API качества) в конце строки длительности/качества
+        cardifyAttachQuality(render, e)
+        // повторно после загрузки данных качества
         setTimeout(function () {
-            cardifyAttachQualityIcon(render, e)
-        }, 600)
+            cardifyAttachQuality(render, e)
+        }, 900)
 
         // Убираем лишний разделитель серий в деталях
         var details = render.find('.full-start-new__details')
@@ -5418,6 +5358,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
         cardifySettings()
 
         cardifyUpdateVisibility()
+        cardifyLoadQuality()
 
         Lampa.Storage.listener.follow('change', function (e) {
             if (e.name === 'cardify_show_status' || e.name === 'cardify_show_pg' || e.name === 'cardify_show_rating') {
