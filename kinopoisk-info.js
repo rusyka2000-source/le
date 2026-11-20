@@ -4216,7 +4216,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify-quality{display:inline-flex;align-items:center;gap:0.5em;margin:0 0 0.5em 0;padding:0.3em 0.7em;border-radius:0.5em;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.18);box-shadow:1px 1px 4px rgba(0,0,0,0.9)}' +
             '.cardify-quality__badge{display:inline-flex;align-items:center;gap:0.35em;font-size:1.05em;font-weight:700;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
             '.cardify-quality__badge svg{width:1.3em;height:1.3em;flex:0 0 auto}' +
-            '.cardify-quality__icon{width:1.25em;height:1.25em;margin-right:0.35em;display:inline-block;vertical-align:middle;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
+            '.cardify-quality__icon{width:1.25em;height:1.25em;margin-left:0.35em;display:inline-block;vertical-align:middle;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -5024,11 +5024,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
             }
         })
 
-        if (!best) {
-            try { consider(Lampa.Storage.field('quality')) } catch (e2) {}
-            try { consider(Lampa.Storage.field('video_quality')) } catch (e3) {}
-        }
-
         return best ? best.res : null
     }
 
@@ -5062,28 +5057,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
     function cardifyAttachQualityIcon(render, e) {
         var level = cardifyQualityLevel(e)
-        var iconHtml = null
 
-        // строка деталей: длительность, год, качество
-        var $details = render.find('.full-start-new__details, .cardify__details').first()
-        var $target = null
-        var qText = ''
-
-        if ($details.length) {
-            // найдем span с уже написанным качеством
-            $details.find('span').each(function () {
-                var $s = $(this)
-                var t = $s.text().trim()
-                var tl = t.toLowerCase()
-                if (/4k|4к|2160p|2160|1440p|1440|1080p|1080|720p|720|fullhd|full hd|fhd|qhd|\b2k\b|\bhd\b|\bsd\b/i.test(tl)) {
-                    $target = $s
-                    qText = tl
-                    return false
-                }
-            })
-        }
-
-        // уровень качества из найденного текста (важнее данных)
         function textLevel(t) {
             if (/4k|4к|2160/.test(t)) return 2160
             if (/1440|qhd|2k/.test(t)) return 1440
@@ -5092,23 +5066,34 @@ if (data && data.Results && Array.isArray(data.Results)) {
             if (/sd|480/.test(t)) return 480
             return null
         }
-        var tLevel = qText ? textLevel(qText) : null
-        if (tLevel && (!level || tLevel > level)) level = tLevel
-        iconHtml = cardifyQualitySvg(level && level >= 2160 ? '4k' : '')
 
-        // если качество-текст найден — вставить SVG inline перед ним
-        if ($target && $target.length) {
-            if (!$target.find('.cardify-quality__icon').length) $target.prepend(iconHtml)
-            return
-        }
+        // строка деталей: длительность, год, качество
+        var $details = render.find('.full-start-new__details, .cardify__details').first()
 
-        // если нет span качества — добавить SVG в одну строку деталей (рядом с длительностью)
+        // определяем уровень качества из текста деталей, а если там нет —
+        // из текста других элементов карточки (заголовок, рейтинги, кнопки)
+        var tLevel = null
         if ($details.length) {
-            if (!$details.find('.cardify-quality__icon').length) $details.prepend(iconHtml)
+            tLevel = textLevel($details.text())
+        }
+        if (!tLevel) {
+            var probe = render.find('.full-start-new__title, .full-start-new__rate-line, .full-start__button, .full-start-new__head')
+            probe.each(function () {
+                var tl = textLevel($(this).text())
+                if (tl) { tLevel = tl; return false }
+            })
+        }
+        if (tLevel && (!level || tLevel > level)) level = tLevel
+
+        var iconHtml = cardifyQualitySvg(level && level >= 2160 ? '4k' : '')
+
+        // добавляем SVG в конце строки деталей
+        if ($details.length) {
+            if (!$details.find('.cardify-quality__icon').length) $details.append(iconHtml)
             return
         }
 
-        // крайний fallback: бейдж под заголовком
+        // fallback: бейдж под заголовком
         var $title = render.find('.full-start-new__title')
         if ($title.length) {
             var qHtml = cardifyQualityIcon(e)
@@ -5137,8 +5122,12 @@ if (data && data.Results && Array.isArray(data.Results)) {
             }
         }
 
-        // Иконка качества рядом с уже написанным качеством в карточке
+        // Иконка качества в конце строки длительности/качества
         cardifyAttachQualityIcon(render, e)
+        // повторно после заполнения деталей (когда Lampa напишет длительность/качество)
+        setTimeout(function () {
+            cardifyAttachQualityIcon(render, e)
+        }, 600)
 
         // Убираем лишний разделитель серий в деталях
         var details = render.find('.full-start-new__details')
