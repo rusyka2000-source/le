@@ -5459,9 +5459,25 @@ if (data && data.Results && Array.isArray(data.Results)) {
                 if (!act || !act.activity) return
                 var render = typeof act.activity.render == 'function' ? act.activity.render() : null
                 if (!render) return
-                cardifyAttachQuality(render, { data: act.card || {}, object: act })
+                var res = e.element && e.element._recommendFeatures && e.element._recommendFeatures.resolution
+                if (!res) return
+                cardifyUpdateQualityFromTorrent(render, res)
             } catch (err) {}
         })
+    }
+
+    function cardifyUpdateQualityFromTorrent(render, res) {
+        var label = cardifyResLabel(res)
+        if (!label) return
+        var $details = render.find('.full-start-new__details').first()
+        if (!$details.length) $details = render.find('.cardify__details').first()
+        if (!$details.length) return
+        var $badge = $details.find('.card--quality')
+        if ($badge.length) {
+            $badge.html(label)
+        } else {
+            $details.append('<span class="full-start-new__split">●</span>' + cardifyQualityBadge(label))
+        }
     }
 
     function init() {
