@@ -4214,7 +4214,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify .full-start-new__reactions{text-shadow:1px 1px 3px rgba(0,0,0,0.9);margin:0 0 0.4em 0}' +
             '.cardify .full-start__rate, .cardify .full-start__status, .cardify .full-start__pg{text-shadow:1px 1px 4px rgba(0,0,0,0.95);-webkit-backdrop-filter:blur(1px)}' +
             '.card--quality{display:inline-flex;align-items:center;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
-            '.card--quality__icon{width:1.2em;height:1.2em;display:inline-block;vertical-align:middle;margin-right:0.35em;color:#ffe216;flex:0 0 auto}' +
+            '.card--quality__icon{width:1.35em;height:1.35em;display:inline-block;vertical-align:middle;margin-right:0.3em;color:#fff;flex:0 0 auto}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -4993,8 +4993,8 @@ if (data && data.Results && Array.isArray(data.Results)) {
     function cardifyLoadQuality() {
         if (cardifyQualityLoaded) return
         cardifyQualityLoaded = true
-        if (!network) return
-        network.silent(cardifyQualityApi, function (json) {
+
+        function done(json) {
             try {
                 if (typeof json == 'string') json = JSON.parse(json)
                 var results = json && json.results
@@ -5005,8 +5005,47 @@ if (data && data.Results && Array.isArray(data.Results)) {
                     })
                 }
                 cardifyQualityCache = { data: results, map: map }
+                console.log('[Cardify] API качества: элементов=' + (results ? results.length : 0))
+                cardifyRetryAttach()
             } catch (e) {}
-        }, function () {}, false, { timeout: 1000 * 10 })
+        }
+
+        // XHR.open — рабочий механизм из примера (обходит CORS в Lampa)
+        try {
+            var xhr = new XMLHttpRequest()
+            if (xhr.open) {
+                xhr.open('GET', cardifyQualityApi, true)
+                xhr.timeout = 10000
+                xhr.onload = function () {
+                    if (xhr.status >= 200 && xhr.status < 300) done(xhr.responseText)
+                }
+                xhr.onerror = xhr.ontimeout = function () {}
+                xhr.send()
+                return
+            }
+        } catch (e) {}
+
+        // fallback: Lampa.Reguest
+        if (network) {
+            try {
+                network.silent(cardifyQualityApi, function (json) {
+                    done(json)
+                }, function () {}, false, { timeout: 1000 * 10 })
+            } catch (e) {}
+        }
+    }
+
+    function cardifyRetryAttach() {
+        // повторная привязка к активной карточке после получения данных качества
+        try {
+            var act = Lampa.Activity.active()
+            if (!act) return
+            var activity = act.activity
+            if (!activity) return
+            var render = typeof activity.render == 'function' ? activity.render() : null
+            if (!render) return
+            cardifyAttachQuality(render, { data: act.card || {}, object: act })
+        } catch (e) {}
     }
 
     function cardifyQualityQu(id) {
@@ -5023,6 +5062,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
         if (!id) return
 
         var qu = cardifyQualityQu(id)
+        console.log('[Cardify] quality id=' + id + ' qu=' + (qu || 'null') + ' cache=' + (cardifyQualityCache ? Object.keys(cardifyQualityCache.map).length : 'empty'))
         if (!qu) return
 
         var $details = render.find('.full-start-new__details').first()
@@ -5039,9 +5079,23 @@ if (data && data.Results && Array.isArray(data.Results)) {
     function cardifyQualitySvg(qu) {
         var s = String(qu || '').toLowerCase()
         if (s.indexOf('4k') === 0 || /4k|2160/.test(s)) {
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 3h18v18H3zM5 7v10h3v-3h2v3h3v-4.5l-1.5-2.5h2v7h3V7h-3v3l-4-3H5z"/></svg>'
+            // 4K — монитор с маркером 4K
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M9 10h6M12 7v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
         }
-        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M4 4h16v16H4zM6 6v12h3v-5h2v5h3V6h-3v4H9V6z"/></svg>'
+        if (s.indexOf('qhd') === 0 || s.indexOf('2k') === 0 || /1440/.test(s)) {
+            // QHD/2K — монитор с двумя галочками
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M7 11l2.2 2.2L13.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+        }
+        if (/1080|fullhd|full hd|fhd/.test(s)) {
+            // Full HD — монитор с полным сигналом
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+        }
+        if (/720|\bhd\b/.test(s)) {
+            // HD — монитор с маленьким сигналом
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+        }
+        // SD / обычное
+        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
