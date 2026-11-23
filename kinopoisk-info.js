@@ -5060,18 +5060,54 @@ if (data && data.Results && Array.isArray(data.Results)) {
         else if (e.object && e.object.card && e.object.card.id) id = e.object.card.id
         if (!id) return
 
-        var qu = cardifyQualityQu(id)
-        console.log('[Cardify] quality id=' + id + ' qu=' + (qu || 'null') + ' cache=' + (cardifyQualityCache ? Object.keys(cardifyQualityCache.map).length : 'empty'))
-        if (!qu) return
+        // 1) приоритет: максимальное разрешение реальных торрентов
+        var res = cardifyBestTorrentRes()
+        var label = res ? cardifyResLabel(res) : null
+
+        // 2) fallback: качество из API
+        if (!label) {
+            var qu = cardifyQualityQu(id)
+            if (qu) label = cardifyQualityLabel(qu)
+        }
+        if (!label) return
 
         var $details = render.find('.full-start-new__details').first()
         if (!$details.length) $details = render.find('.cardify__details').first()
         if (!$details.length) return
-        if ($details.find('.card--quality').length) return
 
+        // обновляем или создаём бейдж
+        var $existing = $details.find('.card--quality')
+        if ($existing.length) {
+            $existing.html(label)
+            return
+        }
         var badge = '<span class="full-start-new__split">●</span>' +
-            cardifyQualityBadge(qu)
+            cardifyQualityBadge(label)
         $details.append(badge)
+    }
+
+    function cardifyResLabel(res) {
+        var n = parseInt(res, 10)
+        if (n >= 2160) return '4K'
+        if (n >= 1440) return 'QHD'
+        if (n >= 1080) return '1080p'
+        if (n >= 720) return '720p'
+        return n >= 480 ? '480p' : null
+    }
+
+    function cardifyBestTorrentRes() {
+        var best = 0
+        try {
+            // EasyTorrent проставляет _recommendFeatures.resolution на каждый торрент
+            $('.torrent-item').each(function () {
+                var el = $(this)[0]
+                if (el && el._recommendFeatures && el._recommendFeatures.resolution) {
+                    var r = parseInt(el._recommendFeatures.resolution, 10)
+                    if (r && r > best) best = r
+                }
+            })
+        } catch (e) {}
+        return best || null
     }
 
     function cardifyQualityLabel(qu) {
@@ -5084,8 +5120,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
         return (qu || '').trim()
     }
 
-    function cardifyQualityBadge(qu) {
-        var label = cardifyQualityLabel(qu)
+    function cardifyQualityBadge(label) {
         return '<span class="card--quality">' + label + '</span>'
     }
 
@@ -5415,6 +5450,18 @@ if (data && data.Results && Array.isArray(data.Results)) {
         })
 
         Lampa.Listener.follow('full', cardifyOnFull)
+
+        // пересчёт качества по реальным торрентам, когда они пришли
+        Lampa.Listener.follow('torrent', function (e) {
+            if (e.type != 'render') return
+            try {
+                var act = Lampa.Activity.active()
+                if (!act || !act.activity) return
+                var render = typeof act.activity.render == 'function' ? act.activity.render() : null
+                if (!render) return
+                cardifyAttachQuality(render, { data: act.card || {}, object: act })
+            } catch (err) {}
+        })
     }
 
     function init() {
