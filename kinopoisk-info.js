@@ -4213,8 +4213,7 @@ if (data && data.Results && Array.isArray(data.Results)) {
             '.cardify .full-start-new__rate-line>*:last-child{margin-right:0 !important}' +
             '.cardify .full-start-new__reactions{text-shadow:1px 1px 3px rgba(0,0,0,0.9);margin:0 0 0.4em 0}' +
             '.cardify .full-start__rate, .cardify .full-start__status, .cardify .full-start__pg{text-shadow:1px 1px 4px rgba(0,0,0,0.95);-webkit-backdrop-filter:blur(1px)}' +
-            '.card--quality{display:inline-flex;align-items:center;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9)}' +
-            '.card--quality__icon{width:1.35em;height:1.35em;display:inline-block;vertical-align:middle;margin-right:0.3em;color:#fff;flex:0 0 auto}' +
+            '.card--quality{display:inline-flex;align-items:center;padding:0.15em 0.5em;border-radius:0.3em;background:rgba(0,0,0,0.5);color:#fff;font-weight:700;font-size:0.95em;border:1px solid rgba(255,255,255,0.18);box-shadow:1px 1px 3px rgba(0,0,0,0.9);text-shadow:none}' +
             '.cardify__background{left:0; will-change: opacity, transform; transform: translateZ(0);}' +
             '.cardify__background.nodisplay{opacity:0 !important}' +
             '.cardify.nodisplay{-webkit-transform:translate3d(0,50%,0);-moz-transform:translate3d(0,50%,0);transform:translate3d(0,50%,0);opacity:0}' +
@@ -5071,27 +5070,23 @@ if (data && data.Results && Array.isArray(data.Results)) {
         if ($details.find('.card--quality').length) return
 
         var badge = '<span class="full-start-new__split">●</span>' +
-            '<div class="card--quality">' + cardifyQualitySvg(qu) +
-            '<div>' + qu + '</div></div>'
+            cardifyQualityBadge(qu)
         $details.append(badge)
     }
 
-    function cardifyQualitySvg(qu) {
+    function cardifyQualityLabel(qu) {
         var s = String(qu || '').toLowerCase()
-        // монитор-иконка качества, заливка fill (работает в Lampa), цвет явный белый
-        if (s.indexOf('4k') === 0 || /4k|2160/.test(s)) {
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M9 6h6v6h-6zM10 7v4h4V7z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
-        }
-        if (s.indexOf('qhd') === 0 || s.indexOf('2k') === 0 || /1440/.test(s)) {
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M6.5 11.5l2.5 2.5 4.5-6"/><path d="M7 19.5h10v1.5H7z"/></svg>'
-        }
-        if (/1080|fullhd|full hd|fhd/.test(s)) {
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h9v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
-        }
-        if (/720|\bhd\b/.test(s)) {
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h6v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
-        }
-        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h3.5v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
+        if (/4k|2160/.test(s)) return '4K'
+        if (/1440|qhd|2k/.test(s)) return 'QHD'
+        if (/1080|fullhd|full hd|fhd/.test(s)) return '1080p'
+        if (/720|\bhd\b/.test(s)) return '720p'
+        if (/480|\bsd\b/.test(s)) return '480p'
+        return (qu || '').trim()
+    }
+
+    function cardifyQualityBadge(qu) {
+        var label = cardifyQualityLabel(qu)
+        return '<span class="card--quality">' + label + '</span>'
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
