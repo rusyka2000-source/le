@@ -5078,24 +5078,20 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
     function cardifyQualitySvg(qu) {
         var s = String(qu || '').toLowerCase()
+        // монитор-иконка качества, заливка fill (работает в Lampa), цвет явный белый
         if (s.indexOf('4k') === 0 || /4k|2160/.test(s)) {
-            // 4K — монитор с маркером 4K
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M9 10h6M12 7v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M9 6h6v6h-6zM10 7v4h4V7z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
         }
         if (s.indexOf('qhd') === 0 || s.indexOf('2k') === 0 || /1440/.test(s)) {
-            // QHD/2K — монитор с двумя галочками
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M7 11l2.2 2.2L13.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M6.5 11.5l2.5 2.5 4.5-6"/><path d="M7 19.5h10v1.5H7z"/></svg>'
         }
         if (/1080|fullhd|full hd|fhd/.test(s)) {
-            // Full HD — монитор с полным сигналом
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h9v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
         }
         if (/720|\bhd\b/.test(s)) {
-            // HD — монитор с маленьким сигналом
-            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+            return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h6v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
         }
-        // SD / обычное
-        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3.5" width="20" height="13" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.5h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+        return '<svg class="card--quality__icon" viewBox="0 0 24 24" fill="#ffffff" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="3.5" width="21" height="14" rx="1.5"/><path d="M7.5 11h3.5v1H7.5z"/><path d="M7 19.5h10v1.5H7z"/></svg>'
     }
 
     /* ----- Обработчик стартового экрана (полный) ----- */
