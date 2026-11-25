@@ -5,7 +5,6 @@
     window.filminfo_ready = true
 
     var DEFAULT_TOKEN = '94ded508-eb21-47c9-b329-529d58b86b16'
-    var CACHE_TTL = 24 * 60 * 60 * 1000
     var MAX_ALL_PAGES = 3
     var PREVIEW_COUNT = 3
     var MAX_FILMOGRAPHY = 10
@@ -65,6 +64,8 @@
             filminfo_set_comments: { ru: 'Показывать комментарии', en: 'Show comments' },
             filminfo_set_proxy: { ru: 'CORS-прокси (необязательно)', en: 'CORS proxy (optional)' },
             filminfo_set_proxy_desc: { ru: 'Префикс прокси, если API недоступен напрямую. Должен передавать заголовок X-API-KEY.', en: 'Proxy prefix if the API is not reachable directly. It must forward the X-API-KEY header.' },
+            filminfo_set_cache_ttl: { ru: 'Время кэша (часы)', en: 'Cache lifetime (hours)' },
+            filminfo_set_cache_ttl_desc: { ru: 'Сколько часов хранить ответы API Кинопоиска (по умолчанию 24)', en: 'How many hours to keep Kinopoisk API responses (default 24)' },
             filminfo_set_awards: { ru: 'Показывать награды', en: 'Show awards' },
             filminfo_set_actor_info: { ru: 'Показывать информацию об актёрах', en: 'Show actor info' },
             filminfo_awards: { ru: 'Награды', en: 'Awards' },
@@ -156,6 +157,15 @@
             field: {
                 name: Lampa.Lang.translate('filminfo_set_proxy'),
                 description: Lampa.Lang.translate('filminfo_set_proxy_desc')
+            }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'kinopoisk_info',
+            param: { name: 'filminfo_cache_ttl', type: 'input', default: 24, values: '' },
+            field: {
+                name: Lampa.Lang.translate('filminfo_set_cache_ttl'),
+                description: Lampa.Lang.translate('filminfo_set_cache_ttl_desc')
             }
         })
     }
@@ -346,7 +356,9 @@
         var base = KP_BASE + path
         var proxy = String(setting('filminfo_proxy', '') || '').trim()
         if (proxy) {
-            if (proxy.slice(-1) != '/') proxy += '/'
+            proxy = proxy.replace(/\/+$/, '')
+            // Безопасность: если scheme не указан, предпочитаем HTTPS.
+            if (!/^https?:\/\//i.test(proxy)) proxy = 'https://' + proxy
             return proxy + base
         }
         return base
@@ -359,36 +371,87 @@
         }
     }
 
+    function cacheTtl() {
+        var hours = setting('filminfo_cache_ttl', 24)
+        var n = parseFloat(hours)
+        if (!(n > 0)) n = 24
+        return n * 60 * 60 * 1000
+    }
+
     function readCache(key) {
         try {
             var c = Lampa.Storage.get(key, null)
-            if (c && c.time && (Date.now() - c.time) < CACHE_TTL) return c.data
-        } catch (e) {}
+            if (c && c.time && (Date.now() - c.time) < cacheTtl()) return c.data
+        } catch (e) {
+            console.warn('[Kinopoisk] readCache(' + key + ') ошибка:', e)
+        }
         return null
     }
 
     function writeCache(key, data) {
         try {
             Lampa.Storage.set(key, { time: Date.now(), data: data })
-        } catch (e) {}
+        } catch (e) {
+            console.warn('[Kinopoisk] writeCache(' + key + ') ошибка:', e)
+        }
     }
 
-    function kpGet(url, onSuccess, onError) {
-        var cacheKey = 'filminfo_kp_' + url
-        var cached = readCache(cacheKey)
-        if (cached !== null) {
-            onSuccess(cached)
+    var kpInFlight = {}
+    var kpRetryMax = 2
+    var kpRetryDelay = 600
+
+    // Единый сетевой layer для Кинопоиска: cache + dedup in-flight + retry с backoff.
+    // onError(kind): kind = 'auth' | 'network' | 'error'
+    function kpRequestJSON(url, cacheKey, onSuccess, onError, retriesLeft) {
+        retriesLeft = retriesLeft == null ? kpRetryMax : retriesLeft
+
+        if (cacheKey) {
+            var cached = readCache(cacheKey)
+            if (cached !== null) {
+                onSuccess(cached)
+                return
+            }
+        }
+
+        // dedup: если этот URL уже в процессе запроса, не дублируем сетевой вызов.
+        if (kpInFlight[url]) {
+            kpInFlight[url].push({ onSuccess: onSuccess, onError: onError })
             return
+        }
+        kpInFlight[url] = []
+
+        function settle(json, kind) {
+            var pending = kpInFlight[url]
+            kpInFlight[url] = null
+            if (!pending) return
+            if (json !== null) {
+                pending.forEach(function (h) { h.onSuccess(json) })
+            } else {
+                pending.forEach(function (h) { h.onError(kind) })
+            }
         }
 
         network.silent(url, function (json) {
-            writeCache(cacheKey, json)
-            onSuccess(json)
+            if (cacheKey) writeCache(cacheKey, json)
+            settle(json, null)
         }, function (jqXHR) {
             var code = 0
             try { code = network.errorCode(jqXHR) } catch (e) {}
-            onError(code == 401 ? 'auth' : 'network')
+            var kind = code == 401 ? 'auth' : (code == 0 ? 'error' : 'network')
+
+            // retry только на сетевые/временные ошибки, не на auth/401.
+            if (kind == 'network' && retriesLeft > 0) {
+                setTimeout(function () {
+                    kpRequestJSON(url, cacheKey, onSuccess, onError, retriesLeft - 1)
+                }, kpRetryDelay)
+                return
+            }
+            settle(null, kind)
         }, false, kpParams())
+    }
+
+    function kpGet(url, onSuccess, onError) {
+        kpRequestJSON(url, 'filminfo_kp_' + url, onSuccess, onError)
     }
 
     function search(keyword, callback) {
@@ -1658,8 +1721,22 @@
 
     var ET_VERSION = '1.0.0 Beta'
     var ET_QR_PAGE = 'https://darkestclouds.github.io/plugins/easytorrent/'
-    var ET_QR_API = 'https://wozuelafumpzgvllcjne.supabase.co'
-    var ET_QR_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvenVlbGFmdW1wemd2bGxjam5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5Mjg1MDgsImV4cCI6MjA4MjUwNDUwOH0.ODnHlq_P-1wr_D6Jwaba1mLXIVuGBnnUZsrHI8Twdug'
+    var ET_QR_API_DEFAULT = 'https://wozuelafumpzgvllcjne.supabase.co'
+
+    // Безопасность: открытый service-role JWT Supabase удалён из клиента.
+    // Ключ (если он нужен для будущих запросов) задаётся в настройках плагина
+    // (et_qr_key) и хранится только локально в Lampa.Storage, не публикуется.
+    function etQrKey() {
+        var v
+        try { v = Lampa.Storage.field('et_qr_key') } catch (e) {}
+        return String(v == null ? '' : v).trim()
+    }
+
+    function etQrApi() {
+        var v
+        try { v = Lampa.Storage.field('et_qr_api') } catch (e) {}
+        return String(v == null || v == '' ? ET_QR_API_DEFAULT : v).trim()
+    }
 
     var ET_STR = {
         name: 'Торрент-рекомендации',
@@ -1677,7 +1754,11 @@
         config_reset: 'Сбросить к заводским',
         config_error: 'Ошибка: неверный формат JSON',
         resume_title: 'Продолжить просмотр',
-        resume_desc: 'Открывать последний просмотренный торрент с места остановки'
+        resume_desc: 'Открывать последний просмотренный торрент с места остановки',
+        qr_api: 'Supabase API URL',
+        qr_api_desc: 'Базовый URL бэкенда для онлайн-рекомендаций (необязательно)',
+        qr_key: 'Supabase API ключ (X-API-KEY)',
+        qr_key_desc: 'Приватный ключ бэкенда. Хранится только локально, не публикуется в плагине'
     }
 
     var ET_DEFAULT_CONFIG = {
@@ -2210,98 +2291,9 @@ function etAudioTracks(element, item, isSeries, seasonCount) {
         }
     }
 
-    function etMakeScorer() {
-        var cfg = etConfig
-        var rules = cfg.scoring_rules
-        return function (el) {
-            var total = 100
-            var feats = el.features
-            var seeds = el.Seeds || el.seeds || el.Seeders || el.seeders || 0
-            var a = { base: 100, resolution: 0, hdr: 0, bitrate: 0, availability: 0, audio: 0, audio_track: 0 }
-            var priority = cfg.parameter_priority || ['resolution', 'hdr', 'bitrate', 'audio_track', 'availability', 'audio_quality']
-
-            var resW = ((rules.weights && rules.weights.resolution) || 100) / 100
-            var resScore = ((rules.resolution && rules.resolution[feats.resolution]) || 0) * resW
-            a.resolution = resScore
-            total += resScore
-
-            var hdrW = ((rules.weights && rules.weights.hdr) || 100) / 100
-            var hdrScore = ((rules.hdr && rules.hdr[feats.hdr_type]) || 0) * hdrW
-            a.hdr = hdrScore
-            total += hdrScore
-
-            var bitW = (((rules.weights && rules.weights.bitrate) || 100 * (rules.bitrate_bonus && rules.bitrate_bonus.weight)) || 55) / 100
-            var bitScore = 0
-            if (feats.bitrate > 0) {
-                var th = rules.bitrate_bonus && rules.bitrate_bonus.thresholds
-                if (th) {
-                    for (var i = 0; i < th.length; i++) {
-                        if (feats.bitrate >= th[i].min && feats.bitrate < th[i].max) {
-                            bitScore = th[i].bonus * bitW
-                            break
-                        }
-                    }
-                }
-            } else {
-                var bi = priority.indexOf('bitrate')
-                bitScore = (bi === 0 ? -50 : bi === 1 ? -30 : -15) * bitW
-            }
-            a.bitrate = bitScore
-            total += bitScore
-
-var audW = ((rules.weights && rules.weights.audio_track) || 100) / 100
-            var pref = cfg.audio_track_priority || []
-            var tracks = feats.audio_tracks || []
-            var audScore = 0
-            for (var j = 0; j < pref.length; j++) {
-                var key = pref[j]
-                var matched = tracks.indexOf(key) >= 0
-                if (matched) {
-                    audScore = 15 * (pref.length - j) * audW
-                    break
-                }
-            }
-            a.audio_track = audScore
-            total += audScore
-
-            var minSeeds = (cfg.preferences && cfg.preferences.min_seeds) || (rules.availability && rules.availability.min_seeds) || 1
-            var avW = (((rules.weights && rules.weights.availability) || 100 * (rules.availability && rules.availability.weight)) || 70) / 100
-            var avScore = 0
-            if (seeds < minSeeds) {
-                var ai = priority.indexOf('availability')
-                avScore = (ai === 0 ? -80 : ai === 1 ? -40 : -20) * avW
-            } else {
-                avScore = 12 * Math.log10(seeds + 1) * avW
-            }
-            a.availability = avScore
-            total += avScore
-
-            if (priority[0] === 'resolution' && String(cfg.device && cfg.device.type || 'tv_4k').indexOf('4k') >= 0) {
-                if (feats.resolution === 2160 && feats.bitrate > 0) { a.special = 80; total += 80 }
-                else if (feats.resolution === 2160) { a.special = 30; total += 30 }
-                else if (feats.resolution === 1080 && seeds > 50 && feats.bitrate > 0) { a.special = 10; total += 10 }
-            }
-
-            total = Math.max(0, Math.round(total))
-
-            if (setting('et_show_scores', true)) {
-                var ttl = (el.Title || el.title || '').substring(0, 80)
-                console.log('[Score]', ttl, {
-                    total: total,
-                    breakdown: a,
-                    features: { resolution: feats.resolution, hdr_type: feats.hdr_type, bitrate: feats.bitrate, audio_tracks: feats.audio_tracks },
-                    seeds: seeds,
-                    paramPriority: priority.slice(0, 3)
-                })
-            }
-            return { score: total, breakdown: a }
-        }
-    }
-
     function etProcessResults(data, type) {
         if (!setting('et_enabled', true)) return
         if (!data.Results || !Array.isArray(data.Results)) return
-        console.log('[EasyTorrent] Получено от парсера:', data.Results.length, 'торрентов')
 
         var movie = data.movie || (type && type.movie)
         var isSeries = !!(movie && (movie.original_name || (movie.number_of_seasons || 0) > 0 || movie.seasons))
@@ -2315,203 +2307,22 @@ var audW = ((rules.weights && rules.weights.audio_track) || 100) / 100
                 if (pr.episodesTotal > planMax) planMax = pr.episodesTotal
             })
             seasonCount = realMax > 1 ? realMax : planMax
-            if (seasonCount > 1) {
-                console.log('[EasyTorrent] Режим сериала. Анализ: Реальный макс=' + realMax + ', План=' + planMax + '. Используем=' + seasonCount)
-            }
         }
 
-        var scorer = etMakeScorer()
-        var items = data.Results.map(function (el, idx) {
-            var feats = etFeatures(el, movie, isSeries, seasonCount)
-            var res = scorer(Object.assign({}, el, { features: feats }))
-            return { element: el, originalIndex: idx, features: feats, score: res.score, breakdown: res.breakdown }
+        // проставляем только реальные характеристики (нужно для бейджа качества)
+        data.Results.forEach(function (el) {
+            el._recommendFeatures = etFeatures(el, movie, isSeries, seasonCount)
         })
-        console.log('[EasyTorrent] Все торренты оценены')
-
-        items.sort(function (a, b) {
-            if (b.score !== a.score) return b.score - a.score
-            if (b.features.bitrate !== a.features.bitrate) return b.features.bitrate - a.features.bitrate
-            var sa = a.element.Seeds || a.element.seeds || a.element.Seeders || a.element.seeders || 0
-            var sb = b.element.Seeds || b.element.seeds || b.element.Seeders || b.element.seeders || 0
-            return sb - sa
-        })
-
-        if (items.length > 0) {
-            console.log('=== ВСЕ ТОРРЕНТЫ (отсортированы по score) ===')
-            items.forEach(function (it, idx) {
-                var n = it.element.Seeds || it.element.seeds || it.element.Seeders || it.element.seeders || 0
-                var r = it.breakdown
-                var title = (it.element.Title || it.element.title || '').substring(0, 100)
-                var parts = []
-                if (typeof r.audio_track !== 'undefined' && r.audio_track !== 0) parts.push('A:' + (r.audio_track > 0 ? '+' : '') + Math.round(r.audio_track))
-                if (typeof r.resolution !== 'undefined' && r.resolution !== 0) parts.push('R:' + (r.resolution > 0 ? '+' : '') + Math.round(r.resolution))
-                if (typeof r.bitrate !== 'undefined' && r.bitrate !== 0) parts.push('B:' + (r.bitrate > 0 ? '+' : '') + Math.round(r.bitrate))
-                if (typeof r.availability !== 'undefined' && r.availability !== 0) parts.push('S:' + (r.availability > 0 ? '+' : '') + Math.round(r.availability))
-                if (typeof r.hdr !== 'undefined' && r.hdr !== 0) parts.push('H:' + (r.hdr > 0 ? '+' : '') + Math.round(r.hdr))
-                if (typeof r.special !== 'undefined' && r.special !== 0) parts.push('SP:' + (r.special > 0 ? '+' : '') + Math.round(r.special))
-                var tag = parts.length > 0 ? '[' + parts.join(' ') + ']' : '[no breakdown]'
-                console.log((idx + 1) + '. [' + it.score + '] ' + (it.features.resolution || '?') + 'p ' +
-                    it.features.hdr_type + ' ' + it.features.bitrate + 'mb Seeds:' + n + ' ' + tag + ' | ' + title)
-            })
-            console.log('=== ВСЕГО: ' + items.length + ' торрентов ===')
-        }
-
-        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
-        var minSeeds = (etConfig.preferences && etConfig.preferences.min_seeds) || 2
-        var candidates = items.filter(function (it) {
-            return (it.element.Seeds || it.element.seeds || it.element.Seeders || it.element.seeders || 0) >= minSeeds
-        })
-        candidates.slice(0, count).forEach(function (it, idx) {
-            it.rank = idx
-            it.isIdeal = idx === 0 && it.score >= 150
-        })
-        items.forEach(function (it) {
-            it.element._recommendScore = it.score
-            it.element._recommendBreakdown = it.breakdown
-            it.element._recommendFeatures = it.features
-        })
-        console.log('[EasyTorrent] Все торренты промаркированы баллами')
-        console.log('[EasyTorrent] Топ-рекомендации сохранены')
-    }
-
-    function etBreakdownChips(breakdown) {
-        if (!breakdown) return null
-        var $chips = $('<div class="torrent-recommend-panel__chips"></div>')
-        var defs = [
-            { key: 'audio_track', name: 'Озвучка' },
-            { key: 'resolution', name: 'Разреш.' },
-            { key: 'bitrate', name: 'Битрейт' },
-            { key: 'availability', name: 'Сиды' },
-            { key: 'hdr', name: 'HDR' },
-            { key: 'special', name: 'Бонус' }
-        ]
-        defs.forEach(function (d) {
-            if (typeof breakdown[d.key] === 'undefined' || breakdown[d.key] === 0) return
-            var v = Math.round(breakdown[d.key])
-            var sign = v > 0 ? '+' : ''
-            var cls = v >= 0 ? 'tr-chip--pos' : 'tr-chip--neg'
-            $chips.append('<div class="tr-chip ' + cls + '">' +
-                '<span class="tr-chip__name">' + d.name + '</span>' +
-                '<span class="tr-chip__val">' + sign + v + '</span>' +
-                '</div>')
-        })
-        return $chips
-    }
-
-    function etRenderPanel(e) {
-        if (!setting('et_enabled', true)) return
-        var element = e.element
-        var item = e.item
-        var showScores = setting('et_show_scores', true)
-        if (typeof element._recommendRank === 'undefined') return
-        item.find('.torrent-recommend-badge').remove()
-        item.find('.torrent-recommend-panel').remove()
-
-        var rank = element._recommendRank
-        var score = element._recommendScore
-        var breakdown = element._recommendBreakdown || {}
-        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
-        if (!(element._recommendIsIdeal || rank < count || showScores)) return
-
-        var features = element._recommendFeatures || {}
-        var meta = []
-        if (features.resolution) meta.push(features.resolution + 'p')
-        if (features.hdr_type) meta.push(ET_HDR_LABEL[features.hdr_type] || String(features.hdr_type).toUpperCase())
-        if (features.bitrate) meta.push(features.bitrate + ' Mbps')
-
-        var variant = 'neutral'
-        var label = 'Оценка'
-        if (element._recommendIsIdeal) {
-            variant = 'ideal'
-            label = ET_STR.ideal
-        } else if (rank < count) {
-            variant = 'recommended'
-            label = ET_STR.recommended + ' • #' + (rank + 1)
-        }
-
-        var $panel = $('<div class="torrent-recommend-panel torrent-recommend-panel--' + variant + '"></div>')
-        var $left = $('<div class="torrent-recommend-panel__left"></div>')
-        $left.append('<div class="torrent-recommend-panel__label">' + label + '</div>')
-        if (meta.length) $left.append('<div class="torrent-recommend-panel__meta">' + meta.join(' • ') + '</div>')
-
-        var $right = $('<div class="torrent-recommend-panel__right"></div>')
-        if (showScores && typeof score !== 'undefined') {
-            $right.append('<div class="torrent-recommend-panel__score">' + score + '</div>')
-        }
-
-        $panel.append($left)
-        if (showScores) {
-            var chips = etBreakdownChips(breakdown)
-            if (chips) $panel.append(chips)
-        }
-        $panel.append($right)
-        item.append($panel)
     }
 
     function etPatchParserGet(Parser) {
-        console.log('[EasyTorrent] Патчим Parser.get для перехвата и фиксации топов')
+        console.log('[EasyTorrent] Патчим Parser.get для анализа качества')
         var orig = Parser.get
 
         Parser.get = function (type, callback, params) {
             return orig.call(this, type, function (data) {
-if (data && data.Results && Array.isArray(data.Results)) {
+                if (data && data.Results && Array.isArray(data.Results)) {
                     etProcessResults(data, type)
-                    var arr = data.Results
-
-                    var reorder = function (list) {
-                        if (!Array.isArray(list) || list.length === 0) return list
-                        var count = (etConfig.preferences && etConfig.preferences.recommendation_count) || 3
-                        var minSeeds = (etConfig.preferences && etConfig.preferences.min_seeds) || 0
-                        var rec = [].concat(list).filter(function (el) {
-                            var s = el.Seeds || el.seeds || el.Seeders || el.seeders || 0
-                            return (el._recommendScore || 0) > 0 && s >= minSeeds
-                        }).sort(function (a, b) {
-                            return (b._recommendScore || 0) - (a._recommendScore || 0)
-                        }).slice(0, count)
-                        if (rec.length === 0) {
-                            list.forEach(function (el) { el._recommendRank = 999 })
-                            return list
-                        }
-                        var others = Array.prototype.filter.call(list, function (el) { return rec.indexOf(el) < 0 })
-                        var sorted = [].concat(rec, others)
-                        sorted.forEach(function (el, i) {
-                            el._recommendRank = i
-                            el._recommendIsIdeal = i === 0 && (el._recommendScore || 0) >= 150
-                        })
-                        others.forEach(function (el) { el._recommendRank = 999 })
-                        return sorted
-                    }
-
-                    var wrap = function (list) {
-                        if (!list || list._etPatched) return list
-                        var origSort = list.sort
-                        list.sort = function () {
-                            origSort.apply(this, arguments)
-                            var res = reorder(this)
-                            for (var i = 0; i < res.length; i++) this[i] = res[i]
-                            return this
-                        }
-                        var origFilter = list.filter
-                        list.filter = function () {
-                            var res = origFilter.apply(this, arguments)
-                            return wrap(reorder(res))
-                        }
-                        list._etPatched = true
-                        return list
-                    }
-
-                    arr = wrap(reorder(arr))
-                    try {
-                        Object.defineProperty(data, 'Results', {
-                            get: function () { return arr },
-                            set: function (v) { arr = wrap(reorder(v)) },
-                            configurable: true,
-                            enumerable: true
-                        })
-                        console.log('[EasyTorrent] Умная контекстная фильтрация активирована')
-                    } catch (e) {
-                        console.log('[EasyTorrent] Ошибка при фиксации топов:', e)
-                    }
                 }
                 return callback.apply(this, arguments)
             }, params)
@@ -3808,124 +3619,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
     /* ------- Настройки ------- */
 
-    function etConfigView() {
-        var cfg = etConfig
-        var items = [
-            { title: 'Версия конфига', subtitle: cfg.version, noselect: true },
-            { title: 'Тип устройства', subtitle: String(cfg.device && cfg.device.type || '').toUpperCase(), noselect: true },
-            { title: 'Поддержка HDR', subtitle: ((cfg.device && cfg.device.supported_hdr) || []).join(', ') || 'нет', noselect: true },
-            { title: 'Поддержка звука', subtitle: ((cfg.device && cfg.device.supported_audio) || []).join(', ') || 'стерео', noselect: true },
-            { title: 'Приоритет параметров', subtitle: (cfg.parameter_priority || []).join(' > '), noselect: true },
-            { title: 'Приоритет озвучек', subtitle: (cfg.audio_track_priority || []).length + ' шт. • Нажмите для просмотра', action: 'show_voices' },
-            { title: 'Минимально сидов', subtitle: cfg.preferences && cfg.preferences.min_seeds, noselect: true },
-            { title: 'Число рекомендаций', subtitle: cfg.preferences && cfg.preferences.recommendation_count, noselect: true }
-        ]
-        Lampa.Select.show({
-            title: 'Текущая конфигурация',
-            items: items,
-            onSelect: function (e) {
-                if (e.action === 'show_voices') {
-                    var voices = (etConfig.audio_track_priority || []).map(function (v, i) {
-                        return { title: (i + 1) + '. ' + v, noselect: true }
-                    })
-                    Lampa.Select.show({
-                        title: 'Приоритет озвучек',
-                        items: voices,
-                        onBack: function () { etConfigView() }
-                    })
-                }
-            },
-            onBack: function () {
-                try { Lampa.Controller.toggle('settings') } catch (e) {}
-            }
-        })
-    }
-
-    function etQrCode() {
-        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-        var code = ''
-        for (var i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length))
-        return code
-    }
-
-    function etQrPoll(code, callback) {
-        try {
-            var url = ET_QR_API + '/rest/v1/tv_configs?id=eq.' + encodeURIComponent(code) + '&select=data,updated_at'
-            fetch(url, { headers: { apikey: ET_QR_KEY, Authorization: 'Bearer ' + ET_QR_KEY } })
-                .then(function (r) {
-                    if (!r.ok) throw new Error('Fetch failed: ' + r.status)
-                    return r.json()
-                })
-                .then(function (arr) {
-                    callback(arr && arr.length ? arr[0].data : null)
-                })
-                .catch(function (err) {
-                    console.error('[EasyTorrent] Fetch error:', err)
-                    callback(null)
-                })
-        } catch (err) {
-            console.error('[EasyTorrent] Fetch error:', err)
-            callback(null)
-        }
-    }
-
-    function etQrOpen() {
-        var code = etQrCode()
-        var page = ET_QR_PAGE + '?pairCode=' + code
-        var $html = $('<div class="about">' +
-            '<div style="text-align: center; margin-bottom: 20px;">' +
-            '<div id="qrCodeContainer" style="background: white; padding: 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px; height: 20em; width: 20em;"></div>' +
-            '</div>' +
-            '<div class="about__text" style="text-align: center; margin-bottom: 15px;">' +
-            '<strong>Или перейдите вручную:</strong><br>' +
-            '<span style="word-break: break-all;">' + page + '</span>' +
-            '</div>' +
-            '<div class="about__text" style="text-align: center;">' +
-            '<strong>Код сопряжения:</strong>' +
-            '<div style="font-size: 2em; font-weight: bold; letter-spacing: 0.3em; margin: 10px 0; color: #667eea;">' + code + '</div>' +
-            '</div>' +
-            '<div class="about__text" id="qrStatus" style="text-align: center; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; margin-top: 20px;">' +
-            '⏳ Ожидание конфигурации...' +
-            '</div>' +
-            '</div>')
-        var lastGenerated = null
-        var timer = null
-        Lampa.Modal.open({
-            title: 'Настройка приоритетов',
-            html: $html,
-            size: 'medium',
-            onBack: function () {
-                if (timer) { clearInterval(timer); timer = null }
-                Lampa.Modal.close()
-                try { Lampa.Controller.toggle('settings_component') } catch (e) {}
-            }
-        })
-        setTimeout(function () {
-            var el = document.getElementById('qrCodeContainer')
-            if (el && Lampa.Utils && Lampa.Utils.qrcode) {
-                try { Lampa.Utils.qrcode(page, el) } catch (e) {
-                    el.innerHTML = '<p style="color: #f44336;">Ошибка генерации QR-кода</p>'
-                }
-            }
-        }, 100)
-        timer = setInterval(function () {
-            etQrPoll(code, function (cfg) {
-                if (!cfg) return
-                var g = cfg.generated
-                if (g && g === lastGenerated) return
-                lastGenerated = g
-                etSaveConfig(cfg)
-                $('#qrStatus').html('✅ Конфигурация получена и применена!').css('color', '#4CAF50')
-                setTimeout(function () {
-                    if (timer) { clearInterval(timer); timer = null }
-                    Lampa.Modal.close()
-                    Lampa.Noty.show('Конфигурация обновлена!')
-                    try { Lampa.Controller.toggle('settings_component') } catch (e) {}
-                }, 2000)
-            })
-        }, 5000)
-    }
-
     function etSettingsInit() {
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
@@ -3946,203 +3639,26 @@ if (data && data.Results && Array.isArray(data.Results)) {
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
-            param: { name: 'et_show_scores', type: 'trigger', default: true },
-            field: { name: ET_STR.show_scores, description: ET_STR.show_scores_desc }
-        })
-
-        Lampa.SettingsApi.addParam({
-            component: 'kinopoisk_info',
             param: { name: 'et_resume_enabled', type: 'trigger', default: true },
             field: { name: ET_STR.resume_title, description: ET_STR.resume_desc }
         })
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
-            param: { name: 'et_config_json', type: 'static', default: JSON.stringify(ET_DEFAULT_CONFIG) },
-            field: { name: ET_STR.config_json, description: ET_STR.config_json_desc },
-            onRender: function (e) {
-                var update = function () {
-                    var cfg = etConfig
-                    var txt = String(cfg.device && cfg.device.type || '').toUpperCase()
-                    if (cfg.parameter_priority && cfg.parameter_priority.length) txt += ' | ' + cfg.parameter_priority[0]
-                    e.find('.settings-param__value').text(txt)
-                }
-                update()
-                e.on('hover:enter', function () {
-                    Lampa.Select.show({
-                        title: ET_STR.config_json,
-                        items: [
-                            { title: ET_STR.config_view, action: 'view' },
-                            { title: ET_STR.config_edit, action: 'edit' },
-                            { title: ET_STR.config_reset, action: 'reset' }
-                        ],
-                        onSelect: function (sel) {
-                            if (sel.action == 'view') {
-                                etConfigView()
-                            } else if (sel.action == 'edit') {
-                                Lampa.Input.edit({
-                                    value: Lampa.Storage.get('et_config_json') || JSON.stringify(ET_DEFAULT_CONFIG),
-                                    free: true
-                                }, function (val) {
-                                    if (val) {
-                                        try {
-                                            JSON.parse(val)
-                                            etSaveConfig(val)
-                                            update()
-                                            Lampa.Noty.show('OK')
-                                        } catch (err) {
-                                            Lampa.Noty.show(ET_STR.config_error)
-                                        }
-                                    }
-                                    Lampa.Controller.toggle('settings')
-                                })
-                            } else if (sel.action == 'reset') {
-                                etSaveConfig(ET_DEFAULT_CONFIG)
-                                update()
-                                Lampa.Noty.show('OK')
-                                Lampa.Controller.toggle('settings')
-                            }
-                        },
-                        onBack: function () { Lampa.Controller.toggle('settings') }
-                    })
-                })
-            }
+            param: { name: 'et_qr_api', type: 'input', default: ET_QR_API_DEFAULT, values: '' },
+            field: { name: ET_STR.qr_api, description: ET_STR.qr_api_desc }
         })
 
         Lampa.SettingsApi.addParam({
             component: 'kinopoisk_info',
-            param: { name: 'et_qr_setup', type: 'static' },
-            field: { name: 'Расставить приоритеты', description: 'Откройте визард на телефоне через QR-код' },
-            onRender: function (e) {
-                e.on('hover:enter', function () { etQrOpen() })
-            }
+            param: { name: 'et_qr_key', type: 'input', default: '', values: '' },
+            field: { name: ET_STR.qr_key, description: ET_STR.qr_key_desc }
         })
     }
 
     function etStyleInit() {
         if ($('#et-style').length) return
-
-        var css = `
-.torrent-recommend-panel{
-    display: flex;
-    align-items: center;
-    gap: 0.9em;
-    margin: 0.8em -1em -1em;
-    padding: 0.75em 1em 0.85em;
-    border-radius: 0 0 0.3em 0.3em;
-    border-top: 1px solid rgba(255,255,255,0.10);
-    background: rgba(0,0,0,0.18);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-}
-.torrent-recommend-panel__left{
-    min-width: 0;
-    flex: 1 1 auto;
-}
-.torrent-recommend-panel__label{
-    font-size: 0.95em;
-    font-weight: 800;
-    letter-spacing: 0.2px;
-    color: rgba(255,255,255,0.92);
-    line-height: 1.15;
-}
-.torrent-recommend-panel__meta{
-    margin-top: 0.25em;
-    font-size: 0.82em;
-    font-weight: 600;
-    color: rgba(255,255,255,0.58);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.torrent-recommend-panel__right{
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-}
-.torrent-recommend-panel__score{
-    font-size: 1.05em;
-    font-weight: 900;
-    padding: 0.25em 0.55em;
-    border-radius: 0.6em;
-    background: rgba(255,255,255,0.10);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: rgba(255,255,255,0.95);
-}
-.torrent-recommend-panel__chips{
-    display: flex;
-    flex: 2 1 auto;
-    gap: 0.45em;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-}
-.torrent-recommend-panel__chips:empty{
-    display: none;
-}
-.tr-chip{
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.35em;
-    padding: 0.28em 0.55em;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.10);
-}
-.tr-chip__name{
-    font-size: 0.78em;
-    font-weight: 700;
-    color: rgba(255,255,255,0.60);
-}
-.tr-chip__val{
-    font-size: 0.86em;
-    font-weight: 900;
-    color: rgba(255,255,255,0.92);
-}
-.tr-chip--pos{
-    background: rgba(76,175,80,0.10);
-    border-color: rgba(76,175,80,0.22);
-}
-.tr-chip--pos .tr-chip__val{ color: rgba(120,255,170,0.95); }
-.tr-chip--neg{
-    background: rgba(244,67,54,0.10);
-    border-color: rgba(244,67,54,0.22);
-}
-.tr-chip--neg .tr-chip__val{ color: rgba(255,120,120,0.95); }
-.torrent-recommend-panel--ideal{
-    background: linear-gradient(135deg, rgba(255,215,0,0.16) 0%, rgba(255,165,0,0.08) 100%);
-    border-top-color: rgba(255,215,0,0.20);
-}
-.torrent-recommend-panel--ideal .torrent-recommend-panel__label{
-    color: rgba(255,235,140,0.98);
-}
-.torrent-recommend-panel--recommended{
-    background: rgba(76,175,80,0.08);
-    border-top-color: rgba(76,175,80,0.18);
-}
-.torrent-recommend-panel--recommended .torrent-recommend-panel__label{
-    color: rgba(160,255,200,0.92);
-}
-.torrent-recommend-panel{
-    animation: tr-panel-in 0.22s ease-out;
-}
-@keyframes tr-panel-in{
-    from{ opacity: 0; transform: translateY(-3px); }
-    to{ opacity: 1; transform: translateY(0); }
-}
-.torrent-item.focus .torrent-recommend-panel{
-    background: rgba(255,255,255,0.08);
-    border-top-color: rgba(255,255,255,0.16);
-}
-@media (max-width: 520px){
-    .torrent-recommend-panel{
-        gap: 0.7em;
-        padding: 0.65em 0.9em 0.75em;
-    }
-.torrent-recommend-panel__meta{
-        display: none;
-    }
-}
-`
+        var css = ''
         $('<style id="et-style">').html(css).appendTo('head')
     }
 
@@ -4152,10 +3668,6 @@ if (data && data.Results && Array.isArray(data.Results)) {
         etStyleInit()
         etPatchParser()
         etResumeStart()
-
-        Lampa.Listener.follow('torrent', function (e) {
-            if (e.type == 'render') etRenderPanel(e)
-        })
 
         Lampa.Listener.follow('activity', function (e) {
             if (e.type == 'start' && e.component == 'torrents') console.log('[EasyTorrent] Новая страница торрентов')
@@ -4523,6 +4035,15 @@ if (data && data.Results && Array.isArray(data.Results)) {
             param: { name: 'cardify_show_pg', type: 'trigger', default: true },
             field: {
                 name: 'Показывать возрастной рейтинг'
+            }
+        })
+
+        Lampa.SettingsApi.addParam({
+            component: 'cardify',
+            param: { name: 'cardify_quality_api', type: 'input', default: cardifyQualityApiDefault, values: '' },
+            field: {
+                name: 'API качества',
+                description: 'Источник данных о доступном качестве. Можно указать HTTPS URL, чтобы избежать открытого http://'
             }
         })
     }
@@ -4985,13 +4506,25 @@ if (data && data.Results && Array.isArray(data.Results)) {
         }
     }
 
-    var cardifyQualityApi = 'http://94.156.115.58:835/quality'
+    var cardifyQualityApiDefault = 'http://94.156.115.58:835/quality'
     var cardifyQualityCache = null
     var cardifyQualityLoaded = false
+
+    function cardifyQualityUrl() {
+        var v
+        try { v = Lampa.Storage.field('cardify_quality_api') } catch (e) {}
+        v = String(v == null || v == '' ? cardifyQualityApiDefault : v).trim()
+        if (!/^https?:\/\//i.test(v)) v = 'https://' + v
+        return v
+    }
 
     function cardifyLoadQuality() {
         if (cardifyQualityLoaded) return
         cardifyQualityLoaded = true
+
+        var apiUrl = cardifyQualityUrl()
+        var deadline = Date.now() + 10000
+        var triedFallback = false
 
         function done(json) {
             try {
@@ -5006,31 +4539,45 @@ if (data && data.Results && Array.isArray(data.Results)) {
                 cardifyQualityCache = { data: results, map: map }
                 console.log('[Cardify] API качества: элементов=' + (results ? results.length : 0))
                 cardifyRetryAttach()
-            } catch (e) {}
+            } catch (e) {
+                console.warn('[Cardify] Ошибка разбора данных качества:', e)
+            }
         }
 
         // XHR.open — рабочий механизм из примера (обходит CORS в Lampa)
         try {
             var xhr = new XMLHttpRequest()
             if (xhr.open) {
-                xhr.open('GET', cardifyQualityApi, true)
-                xhr.timeout = 10000
+                xhr.open('GET', apiUrl, true)
+                xhr.timeout = Math.max(0, deadline - Date.now())
                 xhr.onload = function () {
-                    if (xhr.status >= 200 && xhr.status < 300) done(xhr.responseText)
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        done(xhr.responseText)
+                    } else {
+                        console.warn('[Cardify] API качества ответил статусом', xhr.status)
+                    }
                 }
-                xhr.onerror = xhr.ontimeout = function () {}
+                xhr.onerror = xhr.ontimeout = function () {
+                    console.warn('[Cardify] Не удалось получить данные качества:', apiUrl)
+                }
                 xhr.send()
                 return
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('[Cardify] XHR недоступен, пробуем Lampa.Reguest:', e)
+        }
 
         // fallback: Lampa.Reguest
         if (network) {
             try {
-                network.silent(cardifyQualityApi, function (json) {
+                network.silent(apiUrl, function (json) {
                     done(json)
-                }, function () {}, false, { timeout: 1000 * 10 })
-            } catch (e) {}
+                }, function () {
+                    console.warn('[Cardify] Lampa.Reguest не смог получить данные качества:', apiUrl)
+                }, false, { timeout: 1000 * 10 })
+            } catch (e) {
+                console.warn('[Cardify] Ошибка запроса качества через Reguest:', e)
+            }
         }
     }
 
